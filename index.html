@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>The Backbone — Build France's Hydrogen Economy</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="hud-top">
+    <div class="hud-item"><span class="hud-label">Budget</span><span class="hud-value" id="hud-money">€500M</span></div>
+    <div class="hud-item"><span class="hud-label">H₂ Price</span><span class="hud-value" id="hud-price">€6.00/kg</span></div>
+    <div class="hud-item"><span class="hud-label">H₂ Produced</span><span class="hud-value" id="hud-produced">0 t</span></div>
+    <div class="hud-item"><span class="hud-label">Customers</span><span class="hud-value" id="hud-customers">0</span></div>
+    <div class="hud-item"><span class="hud-label">Date</span><span class="hud-value" id="hud-day">Jan 1, 2025</span></div>
+    <div class="hud-item"><span class="hud-label">Season</span><span class="hud-value" id="hud-season">Spring</span></div>
+    <div class="hud-item" id="save-toggle" title="Save/Load" style="cursor:pointer"><span class="hud-label">💾</span></div>
+    <div class="hud-item" id="sound-toggle" title="Sound" style="cursor:pointer"><span class="hud-label" id="sound-icon">🔊</span></div>
+    <div id="speed-controls">
+      <button data-speed="0" title="Pause">⏸</button>
+      <button data-speed="1" class="active" title="1x">1×</button>
+      <button data-speed="10" title="10x">10×</button>
+      <button data-speed="100" title="100x">100×</button>
+    </div>
+  </div>
+
+  <div id="build-menu">
+    <h3>⚡ Build</h3>
+    <button class="build-btn" data-type="solar">
+      ☀️ Solar Farm (100MW)<br><span class="cost"></span>
+      <div class="desc">Best in sunny southern regions</div>
+    </button>
+    <button class="build-btn" data-type="wind">
+      💨 Wind Farm (100MW)<br><span class="cost"></span>
+      <div class="desc">Best in northern/coastal regions</div>
+    </button>
+    <button class="build-btn" data-type="nuclear">
+      ⚛️ Nuclear Plant<br><span class="cost"></span>
+      <div class="desc">Steady baseload, nuclear-friendly regions</div>
+    </button>
+    <button class="build-btn" data-type="electrolyzer">
+      🔬 Electrolyzer (50MW)<br><span class="cost"></span>
+      <div class="desc">Converts electricity → H₂ at 70% efficiency</div>
+    </button>
+    <button class="build-btn" data-type="pipeline">
+      🔗 Pipeline<br><span class="cost">Click two regions to connect</span>
+      <div class="desc">The backbone — transport &amp; store H₂</div>
+    </button>
+  </div>
+
+  <div id="info-panel">
+    <h3 id="info-title">Region Info</h3>
+    <div id="info-content"></div>
+  </div>
+
+  <div id="pressure-gauge">
+    <span class="gauge-label">Network</span>
+    <span class="gauge-value" id="gauge-val">0</span>
+    <span class="gauge-unit">bar</span>
+  </div>
+
+  <div id="status-bar">
+    <div class="stat">Supply: <span class="stat-val" id="stat-supply">0</span> kg/day</div>
+    <div class="stat">Demand: <span class="stat-val" id="stat-demand">0</span> kg/day</div>
+    <div class="stat">Curtailed: <span class="stat-val" id="stat-curtail">0</span> MWh</div>
+    <div class="stat">Wright Savings: <span class="stat-val" id="stat-wright">0%</span></div>
+    <div class="stat" style="margin-left:auto">Revenue: <span class="stat-val" id="stat-revenue">€0/day</span></div>
+  </div>
+
+  <div id="tutorial" class="show">
+    <div class="tut-box">
+      <h2 id="tut-title">The Backbone</h2>
+      <p id="tut-text">Build France's hydrogen economy. Prove that a molecular backbone is the missing protocol layer for the energy transition.</p>
+      <div class="step" id="tut-step">Step 1 of 6</div>
+      <button class="tut-btn" id="tut-btn">Begin</button>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+
+  <div id="manifesto-popup">
+    <h3 id="mp-title"></h3>
+    <p id="mp-text"></p>
+    <button id="manifesto-close">Continue</button>
+  </div>
+
+  <div id="save-menu">
+    <button id="save-btn">Save Game</button>
+    <button id="load-btn">Load Game</button>
+    <button id="reset-btn">New Game</button>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

@@ -1,0 +1,370 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0a0e17;
+  --bg2: #111827;
+  --panel: rgba(13, 20, 33, 0.94);
+  --border: #1e3a5f;
+  --text: #e0e7ff;
+  --text2: #64748b;
+  --cyan: #06d6a0;
+  --green: #00ff88;
+  --warn: #f59e0b;
+  --danger: #ef4444;
+  --blue: #3b82f6;
+  --purple: #8b5cf6;
+  --glow: 0 0 12px rgba(6, 214, 160, 0.4);
+  --font: 'Courier New', monospace;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 13px;
+}
+
+#gameCanvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 0;
+}
+
+/* HUD Top Bar */
+#hud-top {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 48px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 24px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+}
+.hud-item { display: flex; align-items: center; gap: 6px; }
+.hud-label { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
+.hud-value { color: var(--cyan); font-size: 15px; font-weight: bold; text-shadow: var(--glow); }
+.hud-value.warn { color: var(--warn); }
+.hud-value.danger { color: var(--danger); }
+
+/* Speed Controls */
+#speed-controls { display: flex; gap: 4px; margin-left: auto; }
+#speed-controls button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
+#speed-controls button:hover,
+#speed-controls button.active {
+  color: var(--cyan);
+  border-color: var(--cyan);
+  box-shadow: var(--glow);
+}
+
+/* Build Menu */
+#build-menu {
+  position: absolute;
+  top: 58px;
+  left: 10px;
+  width: 200px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  overflow: hidden;
+}
+#build-menu h3 {
+  padding: 10px 12px 6px;
+  color: var(--cyan);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.build-btn {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.4);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.2s;
+}
+.build-btn:hover { background: rgba(6, 214, 160, 0.08); }
+.build-btn.active {
+  background: rgba(6, 214, 160, 0.15);
+  border-left: 3px solid var(--cyan);
+}
+.build-btn .cost { color: var(--warn); font-size: 11px; }
+.build-btn .desc { color: var(--text2); font-size: 10px; margin-top: 2px; }
+.build-btn.disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Info Panel */
+#info-panel {
+  position: absolute;
+  top: 58px;
+  right: 10px;
+  width: 260px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  display: none;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+}
+#info-panel h3 {
+  padding: 10px 12px 6px;
+  color: var(--cyan);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border-bottom: 1px solid var(--border);
+}
+#info-panel .info-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 12px;
+  border-bottom: 1px solid rgba(30, 58, 95, 0.3);
+}
+#info-panel .info-row .label { color: var(--text2); font-size: 11px; }
+#info-panel .info-row .val { color: var(--text); font-size: 12px; }
+#info-panel .info-section {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+#info-panel .info-section h4 {
+  color: var(--text2);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
+}
+.manifesto-quote {
+  padding: 8px 12px;
+  color: var(--text2);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px solid var(--border);
+  line-height: 1.4;
+}
+
+/* Status Bar */
+#status-bar {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 36px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 24px;
+  z-index: 10;
+  font-size: 11px;
+}
+#status-bar .stat { display: flex; align-items: center; gap: 4px; }
+#status-bar .stat-val { color: var(--cyan); }
+
+/* Pressure Gauge */
+#pressure-gauge {
+  position: absolute;
+  bottom: 46px;
+  right: 10px;
+  width: 120px;
+  height: 120px;
+  background: var(--panel);
+  border: 2px solid var(--border);
+  border-radius: 50%;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  transition: border-color 0.5s, box-shadow 0.5s;
+}
+#pressure-gauge .gauge-label {
+  color: var(--text2);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#pressure-gauge .gauge-value {
+  color: var(--cyan);
+  font-size: 22px;
+  font-weight: bold;
+  text-shadow: var(--glow);
+  transition: color 0.3s;
+}
+#pressure-gauge .gauge-unit { color: var(--text2); font-size: 10px; }
+
+/* Tutorial Overlay */
+#tutorial {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(0, 0, 0, 0.82);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+#tutorial.show { display: flex; }
+#tutorial .tut-box {
+  background: var(--bg2);
+  border: 1px solid var(--cyan);
+  border-radius: 10px;
+  padding: 32px;
+  max-width: 520px;
+  text-align: center;
+  box-shadow: 0 0 40px rgba(6, 214, 160, 0.2);
+}
+#tutorial .tut-box h2 {
+  color: var(--cyan);
+  font-size: 20px;
+  margin-bottom: 12px;
+  text-shadow: var(--glow);
+}
+#tutorial .tut-box p {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.6;
+  margin-bottom: 16px;
+  white-space: pre-line;
+}
+#tutorial .tut-box .step {
+  color: var(--text2);
+  font-size: 11px;
+  margin-bottom: 16px;
+}
+#tutorial .tut-btn {
+  background: var(--cyan);
+  color: var(--bg);
+  border: none;
+  padding: 10px 28px;
+  font-family: var(--font);
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 4px;
+  font-weight: bold;
+  transition: all 0.2s;
+}
+#tutorial .tut-btn:hover { box-shadow: 0 0 20px rgba(6, 214, 160, 0.5); }
+
+/* Toast */
+#toast {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  padding: 8px 20px;
+  z-index: 50;
+  display: none;
+  color: var(--cyan);
+  font-size: 12px;
+  box-shadow: var(--glow);
+  transition: opacity 0.3s;
+}
+
+/* Manifesto Popup */
+#manifesto-popup {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: var(--bg2);
+  border: 1px solid var(--cyan);
+  border-radius: 10px;
+  padding: 24px;
+  max-width: 480px;
+  z-index: 90;
+  display: none;
+  box-shadow: 0 0 60px rgba(6, 214, 160, 0.15);
+}
+#manifesto-popup h3 {
+  color: var(--cyan);
+  font-size: 14px;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+#manifesto-popup p {
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+#manifesto-popup button {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text2);
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 11px;
+  border-radius: 3px;
+}
+#manifesto-popup button:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+/* Save/Load */
+#save-menu {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  z-index: 30;
+  display: none;
+  gap: 8px;
+}
+#save-menu button {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 6px 16px;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 12px;
+  border-radius: 3px;
+}
+#save-menu button:hover {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
