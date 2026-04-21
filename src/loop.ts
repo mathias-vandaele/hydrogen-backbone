@@ -4,11 +4,21 @@ import { state } from './state';
 import { tick } from './sim';
 import { updateHUD } from './ui';
 
-const SIM_INTERVAL = 100; // ms per sim tick (10 Hz)
+// Fixed sim timestep: one sim tick every 100 ms of wall time at 1× speed
+// (10 Hz). Rendering is always rAF-driven so visuals stay smooth regardless
+// of sim speed. State.speed multiplies wall time: 10× = 10 sim ticks per
+// 100 ms of wall time.
+const SIM_INTERVAL = 100;
 
 let lastTime = 0;
 let simAccum = 0;
 
+/**
+ * One animation frame: accumulate wall-time into simAccum, drain it in
+ * fixed 100 ms chunks (capped at 50 per frame to avoid spiral-of-death
+ * after a long tab-background), advance particles at render rate for
+ * smooth interpolation, draw the frame, and refresh the HUD at ~15 Hz.
+ */
 function frame(timestamp: number): void {
   const dt = Math.min(100, timestamp - lastTime);
   lastTime = timestamp;
@@ -18,6 +28,8 @@ function frame(timestamp: number): void {
     const maxTicks = Math.min(50, Math.floor(simAccum / SIM_INTERVAL));
     for (let i = 0; i < maxTicks; i++) tick();
     simAccum -= maxTicks * SIM_INTERVAL;
+    // If we're way behind (e.g., after tab-hide), drop the backlog rather
+    // than run hundreds of sim ticks at once.
     if (simAccum > SIM_INTERVAL * 10) simAccum = 0;
   }
 
@@ -26,12 +38,16 @@ function frame(timestamp: number): void {
 
   drawFrame(timestamp);
 
-  // UI refresh throttled to ~15 fps.
+  // UI refresh throttled to ~15 fps; DOM updates are the expensive part.
   if (timestamp % 4 < 2) updateHUD();
 
   requestAnimationFrame(frame);
 }
 
+/**
+ * Kick off the main animation loop. Call once after all init* functions
+ * have run.
+ */
 export function startLoop(): void {
   lastTime = performance.now();
   requestAnimationFrame(frame);

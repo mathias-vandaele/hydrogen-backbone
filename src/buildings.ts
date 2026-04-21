@@ -1,6 +1,7 @@
-import { playBuild } from './audio';
+import { playBubble, playBuild } from './audio';
 import { BUILDINGS, LEARNING, REGIONS, TICKS_PER_DAY, getRegionConfig } from './config';
 import { distanceBetween, getCenter } from './map';
+import { spawnPressurePulse } from './particles';
 import { state } from './state';
 import { fmtMoney, showToast, updateBuildCosts } from './ui';
 import type {
@@ -11,12 +12,22 @@ import type {
   PlaceableBuildingType
 } from './types';
 
+/**
+ * Current effective build cost for a placeable type, with Wright's Law
+ * multiplier applied. Drives both the HUD cost readout and actual spend.
+ */
 export function getCost(type: PlaceableBuildingType): number {
   const base = BUILDINGS[type].baseCost;
   const mult = state.wright[type].mult;
   return Math.round(base * mult);
 }
 
+/**
+ * Predicate for "can the player place this building in this region right
+ * now?" — checks budget, region slot capacity, and nuclear sites (only
+ * regions with `nuclearBonus ≥ 0.5` are nuclear-friendly). Pipelines
+ * bypass all of this; they're validated in buildPipeline.
+ */
 export function canBuild(type: BuildingType, regionId: string): boolean {
   if (type === 'pipeline') return true;
   const cost = getCost(type);
@@ -29,6 +40,13 @@ export function canBuild(type: BuildingType, regionId: string): boolean {
   return true;
 }
 
+/**
+ * Place a building (non-pipeline) in a region. Deducts the current cost,
+ * records the building, fans out position around the region centroid so
+ * icons don't overlap, advances the Wright's Law curve (cost drops with
+ * each doubling of cumulative installed capacity), and plays the type-
+ * appropriate sfx. Pipelines go through buildPipeline instead.
+ */
 export function build(type: BuildingType, regionId: string): void {
   if (type === 'pipeline') return; // pipelines go through buildPipeline
   if (!canBuild(type, regionId)) {
@@ -73,11 +91,19 @@ export function build(type: BuildingType, regionId: string): void {
     w.mult = Math.max(0.3, Math.pow(units, exp));
   }
 
-  playBuild();
+  if (type === 'electrolyzer') playBubble();
+  else playBuild();
   showToast(`${cfg.name} built in ${rc.name}!`);
   updateBuildCosts();
 }
 
+/**
+ * Place a pipeline between two regions. Cost is baseCostPerKm × distance,
+ * further discounted by the minimum of the two regions' gas-infra factors
+ * (reusing old corridors is cheaper — the core "reuse what exists"
+ * argument), and scaled by the pipeline Wright's Law multiplier. Rejects
+ * duplicate connections. Updates both regions' pipeConnections counters.
+ */
 export function buildPipeline(fromId: string, toId: string): void {
   // Check if pipe already exists
   const exists = state.pipes.find(p =>
@@ -139,6 +165,22 @@ export function buildPipeline(fromId: string, toId: string): void {
   updateBuildCosts();
 }
 
+/**
+ * Per-tick production pass. Run in two stages:
+ *
+ * 1. Reset region totals, then walk every generator (solar/wind/nuclear)
+ *    and add its output to its region's electricity pool. Solar and wind
+ *    use weather-adjusted factors computed earlier in updateWeather;
+ *    nuclear is flat multiplied by the region's nuclearBonus.
+ * 2. Walk electrolyzers: each consumes up to its MW-day cap from the
+ *    local electricity pool, converts to H₂ via the efficiency formula,
+ *    and pushes the H₂ into regional supply. Emit occasional injection
+ *    pulses for visual feedback.
+ *
+ * Leftover regional electricity after all electrolyzers have run counts
+ * as curtailment — the "scandal" metric the manifesto argues disappears
+ * once the backbone exists.
+ */
 export function updateProduction(): void {
   const s = state;
 
@@ -185,6 +227,10 @@ export function updateProduction(): void {
       b.production = h2Produced;
       rs.supply += h2Produced;
       s.totalH2Produced += h2Produced / TICKS_PER_DAY;
+      // Occasional injection pulse if the region is connected to the network.
+      if (rs.pipeConnections > 0 && Math.random() < 0.03) {
+        spawnPressurePulse(b.regionId, 'inject', Math.min(1, h2Produced / 2000));
+      }
     } else {
       b.production = 0;
     }

@@ -3,7 +3,7 @@ import { $$ } from './dom';
 import { hitTest, mapView } from './map';
 import { setSpeed, togglePause } from './sim';
 import { getRegionConfig } from './config';
-import { hideInfoPanel, showRegionInfo, showToast } from './ui';
+import { hideInfoPanel, hideRegionTooltip, showRegionInfo, showToast, updateRegionTooltip } from './ui';
 import type { BuildingType } from './types';
 
 export const input = {
@@ -13,6 +13,13 @@ export const input = {
   pipeStart: null as string | null
 };
 
+/**
+ * Attach all canvas and keyboard event handlers. Pointer moves update the
+ * cursor-region hit test and the DOM tooltip; clicks drive both "place
+ * building" and "draw pipeline" flows (the pipeline flow is a two-click
+ * picker persisted via `input.pipeStart`). Keys 1/2/3 set sim speed and
+ * Space toggles pause. Right-click or Escape cancel any active build mode.
+ */
 export function initInput(): void {
   const canvas = mapView.canvas;
   if (!canvas) throw new Error('Map not initialized');
@@ -21,6 +28,12 @@ export function initInput(): void {
     input.mx = e.clientX;
     input.my = e.clientY;
     mapView.hoveredRegion = hitTest(input.mx, input.my);
+    updateRegionTooltip(mapView.hoveredRegion, input.mx, input.my);
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    mapView.hoveredRegion = null;
+    hideRegionTooltip();
   });
 
   canvas.addEventListener('click', e => {
@@ -43,6 +56,15 @@ export function initInput(): void {
   });
 }
 
+/**
+ * Dispatch a left-click. Three branches, in priority order:
+ *  - In pipeline build mode: first click captures the start region, second
+ *    click on a different region places the pipe. Clicks outside a region
+ *    are ignored (no half-pipes in mid-air).
+ *  - Any other build mode on a region: place the building there.
+ *  - No build mode: treat as a region selection, showing/hiding the info
+ *    panel accordingly.
+ */
 function handleClick(): void {
   const region = hitTest(input.mx, input.my);
 
@@ -74,6 +96,11 @@ function handleClick(): void {
   }
 }
 
+/**
+ * Leave any active build mode and reset the build UI (deactivates the
+ * build-menu button, restores the default cursor, clears any partial
+ * pipeline start).
+ */
 export function cancelBuild(): void {
   input.buildMode = null;
   input.pipeStart = null;

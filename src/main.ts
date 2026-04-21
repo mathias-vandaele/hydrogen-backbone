@@ -12,6 +12,11 @@ import { setSpeed } from './sim';
 import { initTutorial } from './tutorial';
 import { initUI, toggleSaveMenu } from './ui';
 
+/**
+ * Attach click handlers for the static HUD top bar: save/sound toggles,
+ * speed-control buttons (0/1/10/100×), and the save-menu actions. Called
+ * once from boot after the DOM is ready.
+ */
 function wireTopBar(): void {
   $('#save-toggle').addEventListener('click', toggleSaveMenu);
   $('#sound-toggle').addEventListener('click', toggleAudio);
@@ -28,6 +33,11 @@ function wireTopBar(): void {
   $('#reset-btn').addEventListener('click', resetGame);
 }
 
+/**
+ * Application entry point. Order matters: map/audio/particles/input/UI
+ * must be initialized before the main loop starts ticking, and load-from-
+ * storage must run before initUI so the HUD reflects the loaded state.
+ */
 function boot(): void {
   installRoundRectPolyfill();
   loadFromStorageIfPresent();

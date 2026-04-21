@@ -1,9 +1,29 @@
+import { playWhoosh } from './audio';
 import { MAX_PRESSURE, MIN_PRESSURE, REGIONS, TICKS_PER_DAY } from './config';
 import { state } from './state';
 
 const ITERATIONS = 6;
 const RELAXATION = 0.4;
 
+// Whoosh when network pressure crosses these thresholds (rising edge only).
+const WHOOSH_THRESHOLDS = [25, 50, 70];
+let prevNetworkPressure = 0;
+
+/**
+ * Solve one tick of the network pressure simulation. Pressure is a
+ * self-regulating flow mechanism:
+ *
+ * 1. Each region's pressure drifts toward more-or-less depending on local
+ *    net supply/demand (its own production minus its own consumption).
+ * 2. A few Gauss-Seidel-style relaxation passes move gas through pipes
+ *    driven by the pressure differential between the two endpoints, with
+ *    conductance proportional to pipe capacity.
+ * 3. Each pipe's stored pressure = average of its endpoints, and its
+ *    line-packed mass scales linearly with that pressure — the pipe IS
+ *    the battery.
+ * 4. Compute the network-average pressure (connected regions only) and
+ *    emit an audible "whoosh" if it crosses a milestone threshold.
+ */
 export function solvePressure(): void {
   const s = state;
   if (s.pipes.length === 0) {
@@ -63,4 +83,10 @@ export function solvePressure(): void {
     }
   }
   s.networkPressure = connectedRegions > 0 ? totalPressure / connectedRegions : 0;
+
+  // Rising-edge threshold crossings → play a whoosh so the player feels it.
+  for (const thr of WHOOSH_THRESHOLDS) {
+    if (prevNetworkPressure < thr && s.networkPressure >= thr) playWhoosh();
+  }
+  prevNetworkPressure = s.networkPressure;
 }

@@ -59,10 +59,10 @@ export interface CustomerTypeConfig {
 
 export interface RegionConfig {
   id: string;
+  code: string; // INSEE region code matching the source GeoJSON properties.code
   name: string;
   abbr: string;
   capital: string;
-  capitalCoord: [number, number];
   solarBase: number;
   windBase: number;
   nuclearBonus: number;
@@ -72,7 +72,25 @@ export interface RegionConfig {
   gasInfra: number;
   maxSlots: number;
   color: string;
-  polygon: Array<[number, number]>;
+}
+
+export interface RegionBonuses {
+  solar: number;
+  wind: number;
+  nuclear: number;
+  industrial: number;
+  port: number;
+  landCapacity: number;
+}
+
+export interface Region {
+  id: string;
+  code: string;
+  name: string;
+  polygon: Array<{ x: number; y: number }>;
+  rings: Array<Array<{ x: number; y: number }>>; // full multi-polygon (including islands)
+  bonuses: RegionBonuses;
+  centroid: { x: number; y: number };
 }
 
 export interface Insight {
@@ -149,6 +167,13 @@ export interface WrightState {
   pipeline: WrightCurve;
 }
 
+export interface MilestoneFlags {
+  firstCustomer: boolean;
+  curtailment100: boolean;
+  priceBelow3: boolean;
+  tenPipes: boolean;
+}
+
 export interface GameState {
   tick: number;
   gameDay: number;
@@ -161,6 +186,7 @@ export interface GameState {
   dailyRevenue: number;
   spotPrice: number;
   priceHistory: number[];
+  pressureHistory: number[];
   totalH2Produced: number;
   totalH2Sold: number;
   totalCurtailed: number;
@@ -177,5 +203,7 @@ export interface GameState {
   tutorialDone: boolean;
   insightIndex: number;
   lastInsightDay: number;
+  milestones: MilestoneFlags;
+  lastSavedAt: number;
   version: number;
 }

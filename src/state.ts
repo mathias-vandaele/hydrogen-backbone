@@ -1,6 +1,11 @@
 import { REGIONS, START_MONEY } from './config';
 import type { GameState, RegionState } from './types';
 
+/**
+ * Build a fresh, ready-to-play GameState. Called on boot when no save
+ * exists, on "New Game", and by save-migration to source defaults for
+ * fields missing from older saves.
+ */
 export function createInitialState(): GameState {
   const regions: Record<string, RegionState> = {};
   for (const r of REGIONS) {
@@ -26,6 +31,7 @@ export function createInitialState(): GameState {
     dailyRevenue: 0,
     spotPrice: 6.0,
     priceHistory: [],
+    pressureHistory: [],
     totalH2Produced: 0,
     totalH2Sold: 0,
     totalCurtailed: 0,
@@ -48,13 +54,27 @@ export function createInitialState(): GameState {
     tutorialDone: false,
     insightIndex: 0,
     lastInsightDay: 0,
+    milestones: {
+      firstCustomer: false,
+      curtailment100: false,
+      priceBelow3: false,
+      tenPipes: false
+    },
+    lastSavedAt: 0,
     version: 1
   };
 }
 
-// Live binding: reassigning `state` is visible to all importers.
+// Live binding: importers get the current `state` reference on every read
+// thanks to ESM live bindings. Reassigning via replaceState() is the only
+// supported way to swap the whole state object (e.g. on load/new game).
 export let state: GameState = createInitialState();
 
+/**
+ * Swap the entire game state. All modules observe the change immediately
+ * via their imported `state` reference — do not cache `state` in a local
+ * at module scope, or it will go stale after a load/reset.
+ */
 export function replaceState(next: GameState): void {
   state = next;
 }

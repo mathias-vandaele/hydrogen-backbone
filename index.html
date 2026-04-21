@@ -55,17 +55,17 @@
     <div id="info-content"></div>
   </div>
 
-  <div id="pressure-gauge">
-    <span class="gauge-label">Network</span>
-    <span class="gauge-value" id="gauge-val">0</span>
-    <span class="gauge-unit">bar</span>
-  </div>
+  <div id="region-tooltip"></div>
+  <div id="build-tooltip"></div>
 
   <div id="status-bar">
     <div class="stat">Supply: <span class="stat-val" id="stat-supply">0</span> kg/day</div>
     <div class="stat">Demand: <span class="stat-val" id="stat-demand">0</span> kg/day</div>
     <div class="stat">Curtailed: <span class="stat-val" id="stat-curtail">0</span> MWh</div>
     <div class="stat">Wright Savings: <span class="stat-val" id="stat-wright">0%</span></div>
+    <div class="stat" title="Oil price at which e-fuel production becomes profitable at current H₂ spot price">
+      Oil Ceiling: <span class="stat-val" id="stat-oil-ceiling">€—/bbl</span>
+    </div>
     <div class="stat" style="margin-left:auto">Revenue: <span class="stat-val" id="stat-revenue">€0/day</span></div>
   </div>
 
@@ -90,6 +90,7 @@
     <button id="save-btn">Save Game</button>
     <button id="load-btn">Load Game</button>
     <button id="reset-btn">New Game</button>
+    <div id="save-menu-timestamp"></div>
   </div>
 
   <script type="module" src="/src/main.ts"></script>

@@ -1,20 +1,37 @@
-// Tiny typed query helpers. Cast at the call site when you need a specific element type.
+// Tiny typed DOM query helpers. Centralized here so call sites stay readable
+// and we can throw loud, helpful errors when a selector is wrong.
 
+/**
+ * Required element lookup. Throws if the selector matches nothing so typos
+ * are caught immediately at boot rather than NPE-ing later.
+ */
 export function $<T extends Element = HTMLElement>(selector: string): T {
   const el = document.querySelector<T>(selector);
   if (!el) throw new Error(`Element not found: ${selector}`);
   return el;
 }
 
+/**
+ * Optional element lookup. Use when the target may legitimately be absent
+ * (e.g. UI nodes that are only rendered in certain screens).
+ */
 export function $maybe<T extends Element = HTMLElement>(selector: string): T | null {
   return document.querySelector<T>(selector);
 }
 
+/**
+ * NodeList lookup; iterate with .forEach or spread into an array at the call
+ * site. Returns live HTMLElements by default.
+ */
 export function $$<T extends Element = HTMLElement>(selector: string): NodeListOf<T> {
   return document.querySelectorAll<T>(selector);
 }
 
-// roundRect polyfill for older browsers. Modern Chrome/Safari/Firefox already ship it.
+/**
+ * Install a CanvasRenderingContext2D.roundRect polyfill on browsers that
+ * don't yet ship the native method. Modern Chrome/Safari/Firefox already
+ * have it, so this is a no-op on up-to-date builds. Called once from boot.
+ */
 export function installRoundRectPolyfill(): void {
   const proto = CanvasRenderingContext2D.prototype as unknown as {
     roundRect?: (x: number, y: number, w: number, h: number, r: number | number[]) => void;

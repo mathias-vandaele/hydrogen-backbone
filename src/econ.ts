@@ -1,8 +1,30 @@
 import { CUSTOMER_TYPES, REGIONS, TICKS_PER_DAY } from './config';
+import { spawnPressurePulse } from './particles';
 import { state } from './state';
 
+// Anchor price used as the "dear" reference — no-supply and no-demand
+// regions drift toward it, and the global spot price is normalized against it.
 const BASE_PRICE = 6.0;
 
+/**
+ * Per-tick economy step:
+ *
+ * 1. Roll up each customer's demand for this tick (pressure-relief customers
+ *    like e-fuel refineries scale their intake with local pressure, which is
+ *    exactly the "auto-pressure-relief valve" property the manifesto argues
+ *    for).
+ * 2. Compute the global H₂ spot price from overall supply/demand ratio,
+ *    smoothed into the existing price to avoid flicker, and clamped to a
+ *    sensible range.
+ * 3. Per-region local price drifts toward the spot price (divided by local
+ *    pressure factor — cheap pipes mean cheap gas) or toward a "dear"
+ *    default if the region is disconnected.
+ * 4. Distribute revenue: each active customer pays for the H₂ it actually
+ *    received, proportional to local supply/demand satisfaction. Occasionally
+ *    emit a "withdraw" pressure pulse for visual feedback.
+ * 5. Append today's spot price and network pressure to the history ring
+ *    buffers (one sample per game day, retained ≤365 samples).
+ */
 export function updateEcon(): void {
   const s = state;
 
@@ -64,15 +86,21 @@ export function updateEcon(): void {
     tickRevenue += revenue;
     c.satisfaction = supplyRatio;
     s.totalH2Sold += servedPerTick;
+    // Occasional withdraw pulse when the customer is actually served.
+    if (servedPerTick > 0 && rs.pipeConnections > 0 && Math.random() < 0.015) {
+      spawnPressurePulse(c.regionId, 'withdraw', Math.min(1, servedPerTick / 500));
+    }
   }
 
   s.money += tickRevenue;
   s.totalRevenue += tickRevenue;
   s.dailyRevenue = tickRevenue * TICKS_PER_DAY;
 
-  // Record price history once per day.
+  // Record daily histories (ring-buffered at 365 samples ≈ one year).
   if (s.tick % TICKS_PER_DAY === 0) {
     s.priceHistory.push(s.spotPrice);
     if (s.priceHistory.length > 365) s.priceHistory.shift();
+    s.pressureHistory.push(s.networkPressure);
+    if (s.pressureHistory.length > 365) s.pressureHistory.shift();
   }
 }

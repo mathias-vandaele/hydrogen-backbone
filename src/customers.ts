@@ -1,10 +1,19 @@
 import { playCustomer } from './audio';
 import { CUSTOMER_TYPES, REGIONS, TICKS_PER_DAY, getRegionConfig } from './config';
 import { getCenter } from './map';
+import { triggerRegionFlash } from './renderer';
 import { state } from './state';
 import { showToast } from './ui';
 import type { CustomerType } from './types';
 
+/**
+ * Daily roll for spontaneous customer emergence: walks every region, and
+ * for each customer archetype with a price threshold that is currently met,
+ * samples a probability based on how far local price has dropped below the
+ * threshold, region bias (industrial factor, port requirement), and a soft
+ * saturation penalty for duplicates. This is the mechanic that embodies
+ * the manifesto's "permissionless consumption" claim.
+ */
 export function checkEmergence(): void {
   const s = state;
   if (s.tick % TICKS_PER_DAY !== 0) return; // Once per day
@@ -35,6 +44,11 @@ export function checkEmergence(): void {
   }
 }
 
+/**
+ * Materialize a new customer in a region: positions it randomly inside
+ * the region's centroid radius, scales in from 0 via `updateCustomers`
+ * animation, emits a region flash + arpeggio ping, and toasts a name.
+ */
 export function spawnCustomer(regionId: string, type: CustomerType, demand: number): void {
   const s = state;
   const cfg = CUSTOMER_TYPES[type];
@@ -62,9 +76,15 @@ export function spawnCustomer(regionId: string, type: CustomerType, demand: numb
   });
 
   playCustomer();
+  triggerRegionFlash(regionId);
   showToast(`${cfg.icon} New ${cfg.name} in ${rc.name}!`);
 }
 
+/**
+ * Per-tick customer bookkeeping: advance the pop-in scale animation every
+ * tick, then on day boundaries evaluate churn — customers whose satisfaction
+ * stays below 30% for too many days leave, freeing up demand for others.
+ */
 export function updateCustomers(): void {
   const s = state;
 

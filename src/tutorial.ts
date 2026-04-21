@@ -41,6 +41,11 @@ const STEPS: TutorialStep[] = [
   }
 ];
 
+/**
+ * Wire up the tutorial's "Next" button and decide whether to show the
+ * tutorial at all on boot. Called after state has been loaded, so it
+ * respects a prior save's `tutorialDone` flag.
+ */
 export function initTutorial(): void {
   $('#tut-btn').addEventListener('click', nextStep);
   if (state.tutorialDone) {
@@ -50,6 +55,11 @@ export function initTutorial(): void {
   showStep(0);
 }
 
+/**
+ * Render a specific tutorial step in the overlay. Passing an idx ≥ STEPS.length
+ * marks the tutorial complete and hides the overlay — that's how the
+ * final "Start Playing!" button closes the tutorial.
+ */
 export function showStep(idx: number): void {
   state.tutorialStep = idx;
   if (idx >= STEPS.length) {
@@ -64,6 +74,7 @@ export function showStep(idx: number): void {
   $('#tut-btn').textContent = step.btn;
 }
 
+/** Advance to the next tutorial step (wired to the "Next" button). */
 export function nextStep(): void {
   playClick();
   showStep(state.tutorialStep + 1);
