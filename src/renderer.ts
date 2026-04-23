@@ -57,79 +57,6 @@ export function drawFrame(timestamp: number): void {
   drawCustomers(ctx);
   drawPlacementGhost(ctx);
   drawDashboard(ctx, w, h);
-  drawCinematicOverlay(ctx, w, h);
-}
-
-// ─── Endgame cinematics (Priority 5) ─────────────────────────────────────
-
-/**
- * Paint the active endgame cinematic over the top of the normal scene.
- * Two stages:
- *  - Oil parity: sustained network-wide bloom + green tint for ~10s.
- *  - Escape velocity: slow camera-style vignette pullback + amplified
- *    junction pulses; after 10s control hands off to the DOM end screen
- *    (ui.ts checks `state.endgame.endScreenVisible`).
- * Pure visuals — the sim continues uninterrupted underneath.
- */
-function drawCinematicOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const stage = state.endgame.cinematicStage;
-  if (stage === 'none') return;
-  const elapsed = performance.now() - state.endgame.cinematicStartedAt;
-  const dur = 10_000;
-  const t = Math.min(1, Math.max(0, elapsed / dur));
-  // Fade in → hold → fade out envelope.
-  const env = t < 0.2 ? t / 0.2 : t > 0.8 ? (1 - t) / 0.2 : 1;
-
-  ctx.save();
-  if (stage === 'oilParity') {
-    // Soft green wash + concentric ring from the map centre.
-    ctx.fillStyle = `rgba(0, 255, 136, ${0.08 * env})`;
-    ctx.fillRect(0, 0, w, h);
-    const cx = mapView.mapX + mapView.mapW / 2;
-    const cy = mapView.mapY + mapView.mapH / 2;
-    const ringR = 60 + t * 520;
-    ctx.strokeStyle = `rgba(120, 255, 180, ${0.6 * env})`;
-    ctx.lineWidth = 3;
-    ctx.shadowColor = 'rgba(120, 255, 180, 0.7)';
-    ctx.shadowBlur = 24;
-    ctx.beginPath();
-    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.shadowBlur = 0;
-    ctx.font = 'bold 24px Courier New';
-    ctx.textAlign = 'center';
-    ctx.fillStyle = `rgba(200, 255, 220, ${0.95 * env})`;
-    ctx.fillText('OIL PARITY', cx, cy - 12);
-    ctx.font = '11px Courier New';
-    ctx.fillStyle = `rgba(200, 255, 220, ${0.75 * env})`;
-    ctx.fillText('e-fuels undercut petroleum', cx, cy + 8);
-  } else if (stage === 'escapeVelocity') {
-    // Dim the rest of the scene so the network pops.
-    ctx.fillStyle = `rgba(3, 6, 12, ${0.55 * env})`;
-    ctx.fillRect(0, 0, w, h);
-    // Cadence flash across customer icons
-    for (const c of state.customers) {
-      if (!c.active) continue;
-      const phase = ((t * 6) - (c.id % 13) * 0.08) % 1;
-      if (phase < 0 || phase > 0.2) continue;
-      const flash = 1 - phase / 0.2;
-      ctx.fillStyle = `rgba(6, 214, 160, ${0.55 * flash})`;
-      ctx.beginPath();
-      ctx.arc(c.x, c.y, 14 + 10 * flash, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    // Centered quote
-    const cx = w / 2;
-    const cy = h / 2;
-    ctx.textAlign = 'center';
-    ctx.fillStyle = `rgba(200, 255, 220, ${0.95 * env})`;
-    ctx.font = 'bold 28px Courier New';
-    ctx.fillText('THE FLYWHEEL IGNITES', cx, cy - 20);
-    ctx.font = '12px Courier New';
-    ctx.fillStyle = `rgba(180, 230, 220, ${0.8 * env})`;
-    ctx.fillText('"You build the backbone to make hydrogen cheap."', cx, cy + 10);
-  }
-  ctx.restore();
 }
 
 // ─── Region flashes (triggered when new customers emerge) ─────────────────
@@ -669,7 +596,7 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
     const toCfg = getRegionConfig(mapView.hoveredRegion!);
     if (!fromCfg || !toCfg) return;
     const infraDiscount = 1.0 - (Math.min(fromCfg.gasInfra, toCfg.gasInfra) * 0.4);
-    const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount * state.wright.pipeline.mult);
+    const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount);
 
     const mx = (start[0] + endX) / 2;
     const my = (start[1] + endY) / 2;

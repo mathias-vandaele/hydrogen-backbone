@@ -1,4 +1,4 @@
-import { build, buildPipeline } from './buildings';
+import { build, buildPipeline, toggleProductionDebug } from './buildings';
 import { $$ } from './dom';
 import { hitTest, mapView } from './map';
 import { setSpeed, togglePause } from './sim';
@@ -53,6 +53,10 @@ export function initInput(): void {
     if (e.key === '1') setSpeed(1);
     if (e.key === '2') setSpeed(10);
     if (e.key === '3') setSpeed(100);
+    if (e.shiftKey && (e.key === 'D' || e.key === 'd')) {
+      const on = toggleProductionDebug();
+      showToast(on ? 'Production debug ON — check console' : 'Production debug OFF');
+    }
   });
 }
 

@@ -1,14 +1,25 @@
 import { playClick } from './audio';
 import { getCost } from './buildings';
-import { pathToOilParity } from './chart';
-import { BUILDINGS, CUSTOMER_TYPES, OIL_PARITY_THRESHOLD, REGIONS, getRegionConfig } from './config';
+import {
+  BIG_TIER_CAP,
+  BUILDINGS,
+  CUSTOMER_TYPES,
+  CUSTOMER_SUPPLY_BUFFER_MULTIPLIER,
+  MID_TIER_CAP,
+  SMALL_TIER_CAP,
+  getRegionConfig
+} from './config';
+import { getCurrentTotalDemand, getTierPopulationSummary } from './customers';
 import { $, $$, $maybe } from './dom';
 import {
-  canManuallyTriggerEscapeVelocity,
-  endScreenStats,
-  escapeVelocityProgress,
-  fireEscapeVelocityCinematic
-} from './endgame';
+  getRollingAverageDemand,
+  getRollingAverageOpex,
+  getRollingAverageRevenue,
+  getRollingAverageSupply,
+  getRollingRegionDemand,
+  getRollingRegionSupply,
+  instantaneousTotals
+} from './econ';
 import { input } from './input';
 import { mapView } from './map';
 import { createInitialState, replaceState, state } from './state';
@@ -27,24 +38,6 @@ export function computeRunwayDays(): number {
 }
 
 let toastTimer: number | undefined;
-
-// ─── Oil price ceiling ────────────────────────────────────────────────────
-// Fossil oil price per barrel at which e-fuel production breaks even, given
-// the current H₂ spot price. Roughly: ~42 kg of H₂ to synthesize a barrel of
-// e-fuel plus ~€30/bbl for CO₂ capture + Fischer-Tropsch opex. Pedagogical
-// rather than exact, but aligned with published e-fuel breakeven studies.
-export const H2_KG_PER_BBL = 42;
-export const EFUEL_OVERHEAD_PER_BBL = 30;
-
-/**
- * Compute the break-even oil price (€/bbl) implied by a given H₂ spot
- * price. This is the "oil-price ceiling" the manifesto talks about —
- * below this number e-fuels undercut crude, and the number falls
- * monotonically with H₂ cost.
- */
-export function oilCeiling(h2Price: number): number {
-  return h2Price * H2_KG_PER_BBL + EFUEL_OVERHEAD_PER_BBL;
-}
 
 /**
  * One-time UI wiring after DOM is ready: populate build costs, attach
@@ -68,41 +61,12 @@ export function initUI(): void {
   const hudMoney = $('#hud-money');
   hudMoney.addEventListener('click', () => {/* placeholder for future money breakdown */});
 
-  // Endgame DOM wiring
-  const witness = $maybe<HTMLButtonElement>('#witness-btn');
-  if (witness) witness.addEventListener('click', () => {
-    if (canManuallyTriggerEscapeVelocity()) fireEscapeVelocityCinematic(true);
-  });
-  const cont = $maybe<HTMLButtonElement>('#end-continue');
-  if (cont) cont.addEventListener('click', () => {
-    state.endgame.endScreenVisible = false;
-    state.endgame.phase = 'ended';
-    $('#end-screen').classList.remove('show');
-  });
-  const newGame = $maybe<HTMLButtonElement>('#end-newgame');
-  if (newGame) newGame.addEventListener('click', () => {
-    replaceState(createInitialState());
-    $('#end-screen').classList.remove('show');
-    updateBuildCosts();
-    showToast('New game started!');
-  });
   const gameoverNew = $maybe<HTMLButtonElement>('#gameover-newgame');
   if (gameoverNew) gameoverNew.addEventListener('click', () => {
     replaceState(createInitialState());
     $('#gameover-screen').classList.remove('show');
     updateBuildCosts();
     showToast('New run started.');
-  });
-  const share = $maybe<HTMLButtonElement>('#end-share');
-  if (share) share.addEventListener('click', () => {
-    const s = state;
-    const text = `I reached Escape Velocity in The Backbone on day ${s.gameDay} — ${s.customers.filter(c => c.active).length} customers, H₂ €${s.spotPrice.toFixed(2)}/kg.`;
-    try {
-      navigator.clipboard?.writeText(text);
-      showToast('Summary copied to clipboard.');
-    } catch {
-      showToast('Could not copy summary.');
-    }
   });
 }
 
@@ -143,8 +107,8 @@ function hideBuildQuote(): void {
 /**
  * Update every dynamic DOM element in the HUD from the current state:
  * top-bar numerics (budget, spot price, total H₂, customer count,
- * date/season), status-bar stats (supply, demand, curtailed, Wright
- * savings, revenue, oil ceiling), and speed-button active state.
+ * date/season), status-bar stats (supply, demand, revenue), and
+ * speed-button active state.
  * Called at ~15 Hz by the main loop.
  */
 export function updateHUD(): void {
@@ -166,38 +130,53 @@ export function updateHUD(): void {
   $('#hud-day').textContent = `${months[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
   $('#hud-season').textContent = getSeason(s.dayOfYear);
 
-  // Status bar (pressure gauge is now canvas-rendered)
-  let totalSupply = 0;
-  let totalDemand = 0;
-  for (const rc of REGIONS) {
-    totalSupply += s.regions[rc.id].supply;
-    totalDemand += s.regions[rc.id].demand;
-  }
-  $('#stat-supply').textContent = `${fmtNum(totalSupply)}`;
-  $('#stat-demand').textContent = `${fmtNum(totalDemand)}`;
-  // Curtailment now shown in kg/day (pressure-cap rejection). Flash red
-  // when positive so overbuild ahead of demand reads immediately.
-  const curtEl = $('#stat-curtail');
-  curtEl.textContent = fmtNum(s.totalCurtailed);
-  curtEl.classList.toggle('bad', s.totalCurtailed > 0);
-  curtEl.classList.toggle('cyan', s.totalCurtailed === 0);
+  // Status bar: show rolling 24h averages as the strategic number, with
+  // the instantaneous value as dim "now:" context so the player can
+  // still see day/night swings driving pressure in real time.
+  const { supply: nowSupply, demand: nowDemand } = instantaneousTotals(s);
+  const avgSupply = getRollingAverageSupply(s);
+  const avgDemand = getRollingAverageDemand(s);
+  let nowPower = 0;
+  for (const b of s.buildings) nowPower += b.internalElectricity ?? 0;
+  $('#stat-power-now').textContent = fmtMw(nowPower);
+  $('#stat-supply').textContent = `${fmtNum(avgSupply)}`;
+  $('#stat-demand').textContent = `${fmtNum(avgDemand)}`;
+  const supplyNowEl = $maybe('#stat-supply-now');
+  if (supplyNowEl) supplyNowEl.textContent = `· now: ${fmtNum(nowSupply)}`;
+  const demandNowEl = $maybe('#stat-demand-now');
+  if (demandNowEl) demandNowEl.textContent = `· now: ${fmtNum(nowDemand)}`;
 
   // Economy group: revenue / opex / net.
-  const net = s.dailyRevenue - s.dailyOpex;
+  const avgRevenue = getRollingAverageRevenue(s);
+  const avgOpex = getRollingAverageOpex(s);
+  const net = avgRevenue - avgOpex;
   const revEl = $('#stat-revenue');
   const opxEl = $('#stat-opex');
   const netEl = $('#stat-net');
-  revEl.textContent = `+€${fmtMoney(s.dailyRevenue)}/day`;
-  opxEl.textContent = `-€${fmtMoney(s.dailyOpex)}/day`;
+  revEl.textContent = `+€${fmtMoney(avgRevenue)}/day`;
+  opxEl.textContent = `-€${fmtMoney(avgOpex)}/day`;
   netEl.textContent = `${net >= 0 ? '+' : '-'}€${fmtMoney(Math.abs(net))}/day`;
   netEl.classList.toggle('good', net > 0);
   netEl.classList.toggle('bad', net < 0);
 
   // Network group.
-  const avgWright = (s.wright.solarPlant.mult + s.wright.windPlant.mult) / 2;
-  $('#stat-wright').textContent = `${Math.round((1 - avgWright) * 100)}%`;
-  $('#stat-oil-ceiling').textContent = `€${oilCeiling(s.spotPrice).toFixed(0)}/bbl`;
-  $('#stat-customers').textContent = String(s.customers.filter(c => c.active).length);
+  const ratio = avgDemand > 0 ? avgSupply / avgDemand : (avgSupply > 0 ? Infinity : 0);
+  const ratioEl = $('#stat-supply-ratio');
+  const ratioText = Number.isFinite(ratio) ? ratio.toFixed(2) : '∞';
+  const tierSummary = getTierPopulationSummary();
+  const smallestTierHeadroom = Math.min(
+    ...Object.values(CUSTOMER_TYPES)
+      .filter(cfg => cfg.tier === 'small')
+      .map(cfg => cfg.expectedDemand * CUSTOMER_SUPPLY_BUFFER_MULTIPLIER)
+  );
+  const headroom = avgSupply - getCurrentTotalDemand();
+  const ratioStatus = headroom >= smallestTierHeadroom
+    ? `headroom open (${fmtNum(headroom)} kg/day)`
+    : `headroom low (${fmtNum(headroom)} kg/day)`;
+  ratioEl.textContent = `${ratioText} (${ratioStatus})`;
+  ratioEl.classList.toggle('good', headroom >= smallestTierHeadroom);
+  ratioEl.classList.toggle('bad', headroom < smallestTierHeadroom);
+  $('#stat-customers').textContent = `Small ${tierSummary.small.live}/${SMALL_TIER_CAP} · Mid ${tierSummary.mid.live}/${MID_TIER_CAP} · Big ${tierSummary.big.live}/${BIG_TIER_CAP}`;
 
   // Runway indicator — the single most important v4 HUD element.
   updateRunwayIndicator();
@@ -215,8 +194,6 @@ export function updateHUD(): void {
   const btns = $$<HTMLButtonElement>('#speed-controls button');
   btns[idx]?.classList.add('active');
 
-  updateParityBar();
-  updateEndScreen();
   updateGameOverScreen();
 }
 
@@ -264,7 +241,7 @@ function updateGameOverScreen(): void {
     } else {
       reasonEl.textContent = over.reason;
     }
-    const rows = endScreenStats();
+    const rows = summaryStats();
     const el = $('#gameover-stats');
     el.innerHTML = rows
       .map(r => `<div class="label">${r.label}</div><div class="val">${r.value}</div>`)
@@ -273,60 +250,20 @@ function updateGameOverScreen(): void {
   }
 }
 
-/**
- * Keep the progress bar in sync: pre-parity shows "Path to Oil Parity"
- * descending from €6 → €4.5. Post-parity switches into "Path to Escape
- * Velocity" and starts watching escape-velocity conditions. The
- * "Witness the flywheel" button appears once the Stage 2 gate is met.
- */
-function updateParityBar(): void {
-  const bar = $maybe('#parity-bar');
-  if (!bar) return;
+function summaryStats(): Array<{ label: string; value: string }> {
   const s = state;
-  const preParity = s.endgame.oilParityReachedOnDay === null;
-  if (preParity) {
-    bar.classList.remove('escape');
-    const t = pathToOilParity();
-    ($('#parity-label') as HTMLElement).textContent = 'Path to Oil Parity';
-    ($('#parity-fill') as HTMLElement).style.width = `${Math.round(t * 100)}%`;
-    ($('#parity-readout') as HTMLElement).textContent =
-      `€${s.spotPrice.toFixed(2)} → €${OIL_PARITY_THRESHOLD.toFixed(2)} (${Math.round(t * 100)}%)`;
-    const witness = $maybe<HTMLButtonElement>('#witness-btn');
-    if (witness) witness.style.display = 'none';
-  } else {
-    bar.classList.add('escape');
-    const t = escapeVelocityProgress();
-    ($('#parity-label') as HTMLElement).textContent = 'Path to Escape Velocity';
-    ($('#parity-fill') as HTMLElement).style.width = `${Math.round(t * 100)}%`;
-    ($('#parity-readout') as HTMLElement).textContent =
-      `Flywheel ${Math.round(t * 100)}% · day ${s.gameDay}`;
-    const witness = $maybe<HTMLButtonElement>('#witness-btn');
-    if (witness) {
-      witness.style.display = canManuallyTriggerEscapeVelocity() ? 'inline-block' : 'none';
-    }
+  let connected = 0;
+  for (const rc of Object.values(s.regions)) {
+    if (rc.pipeConnections > 0) connected++;
   }
-}
-
-/**
- * Show the end screen once the escape-velocity cinematic finishes and
- * `endScreenVisible` flips to true. Populates the stats block from
- * endgame.endScreenStats().
- */
-function updateEndScreen(): void {
-  const root = $maybe('#end-screen');
-  if (!root) return;
-  if (!state.endgame.endScreenVisible) {
-    root.classList.remove('show');
-    return;
-  }
-  if (!root.classList.contains('show')) {
-    const rows = endScreenStats();
-    const el = $('#end-stats');
-    el.innerHTML = rows
-      .map(r => `<div class="label">${r.label}</div><div class="val">${r.value}</div>`)
-      .join('');
-    root.classList.add('show');
-  }
+  return [
+    { label: 'Days elapsed', value: String(s.gameDay) },
+    { label: 'Customers online', value: String(s.customers.filter(c => c.active).length) },
+    { label: 'Peak network pressure', value: `${s.networkPressure.toFixed(1)} bar` },
+    { label: 'Connected regions', value: `${connected} / ${Object.keys(s.regions).length}` },
+    { label: 'Final spot price', value: `€${s.spotPrice.toFixed(2)}/kg` },
+    { label: 'Final budget', value: `€${Math.round(s.money / 1e6)}M` }
+  ];
 }
 
 // ─── DOM region tooltip (follows cursor on hover) ────────────────────────
@@ -366,11 +303,15 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   html += `<div class="sub-section">`;
   html += `<div class="sub-line">☁ Cloud ${Math.round(w.clouds * 100)}% · 🌬 Wind ${(w.wind * 100).toFixed(0)}%</div>`;
   html += `<div class="sub-line">🏗 Buildings: ${buildingCount} / ${rc.maxSlots}</div>`;
+  const avgRegionSupply = getRollingRegionSupply(state, regionId);
+  const avgRegionDemand = getRollingRegionDemand(state, regionId);
   if (rs.pipeConnections > 0) {
     html += `<div class="sub-line">📊 Pressure: ${rs.pressure.toFixed(1)} bar · €${rs.localPrice.toFixed(2)}/kg</div>`;
-    html += `<div class="sub-line">Supply ${Math.round(rs.supply)} / Demand ${Math.round(rs.demand)} kg/day</div>`;
-  } else if (rs.supply > 0) {
-    html += `<div class="sub-line">Supply ${Math.round(rs.supply)} kg/day (no pipe)</div>`;
+    html += `<div class="sub-line">Supply ${Math.round(avgRegionSupply)} / Demand ${Math.round(avgRegionDemand)} kg/day (24h avg)</div>`;
+    html += `<div class="sub-line tooltip-now">now ${Math.round(rs.supply)} / ${Math.round(rs.demand)}</div>`;
+  } else if (rs.supply > 0 || avgRegionSupply > 0) {
+    html += `<div class="sub-line">Supply ${Math.round(avgRegionSupply)} kg/day (24h avg, no pipe)</div>`;
+    html += `<div class="sub-line tooltip-now">now ${Math.round(rs.supply)}</div>`;
   } else {
     html += `<div class="sub-line">Not connected to backbone</div>`;
   }
@@ -397,8 +338,7 @@ export function hideRegionTooltip(): void {
 
 /**
  * Recompute the cost label and enabled state for every build-menu button.
- * Called on build/sell, each time Wright's Law advances, and periodically
- * from updateHUD.
+ * Called on build/sell and periodically from updateHUD.
  */
 export function updateBuildCosts(): void {
   for (const [type, cfg] of Object.entries(BUILDINGS)) {
@@ -408,7 +348,7 @@ export function updateBuildCosts(): void {
     if (!costEl) continue;
     if (type === 'pipeline') {
       const pipeCfg = cfg as typeof BUILDINGS.pipeline;
-      costEl.textContent = `~€${fmtMoney(pipeCfg.baseCostPerKm * state.wright.pipeline.mult)}/km`;
+      costEl.textContent = `~€${fmtMoney(pipeCfg.baseCostPerKm)}/km`;
       btn.classList.toggle('disabled', state.money < 5_000_000);
     } else {
       const cost = getCost(type as Exclude<BuildingType, 'pipeline'>);
@@ -467,8 +407,10 @@ export function showRegionInfo(regionId: string): void {
   html += row('Pipe Connections', String(rs.pipeConnections || 0));
   html += row('Local H₂ Price', `€${rs.localPrice.toFixed(2)}/kg`);
   html += row('Pressure', `${rs.pressure.toFixed(1)} bar`);
-  html += row('Supply', `${Math.round(rs.supply)} kg/day`);
-  html += row('Demand', `${Math.round(rs.demand)} kg/day`);
+  const infoAvgSupply = getRollingRegionSupply(state, regionId);
+  const infoAvgDemand = getRollingRegionDemand(state, regionId);
+  html += row('Supply (24h avg)', `${Math.round(infoAvgSupply)} kg/day · now ${Math.round(rs.supply)}`);
+  html += row('Demand (24h avg)', `${Math.round(infoAvgDemand)} kg/day · now ${Math.round(rs.demand)}`);
 
   if (buildings.length > 0) {
     html += `<div class="info-section"><h4>Buildings (${buildings.length}/${rc.maxSlots})</h4>`;
@@ -585,6 +527,14 @@ export function fmtNum(n: number): string {
   if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
   return String(Math.round(n));
+}
+
+/** Power formatter in MW, keeping a little precision at small values. */
+export function fmtMw(n: number): string {
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}GW`;
+  if (n >= 100) return String(Math.round(n));
+  if (n >= 10) return n.toFixed(1);
+  return n.toFixed(2);
 }
 
 /** Mass formatter: kg → kg/t/Kt/Mt with a suffix attached. */

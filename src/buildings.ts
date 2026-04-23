@@ -1,11 +1,14 @@
 import { playBuild } from './audio';
 import {
   BUILDINGS,
-  ECONOMY,
-  LEARNING,
+  ELECTROLYZER_EFFICIENCY,
+  KWH_PER_KG_H2,
+  NUCLEAR_CYCLE_DAYS,
+  NUCLEAR_FLEET_PHASE_OFFSET,
+  NUCLEAR_OUTAGE_DAYS,
+  OPEX_ANNUAL_FRACTION,
   REGIONS,
   TICKS_PER_DAY,
-  WRIGHT_SAVINGS_CAP,
   getRegionConfig
 } from './config';
 import { distanceBetween, getCenter } from './map';
@@ -20,14 +23,11 @@ import type {
 } from './types';
 
 /**
- * Current effective build cost for a placeable type, with Wright's Law
- * multiplier AND the v4 global BUILDING_COST_MULTIPLIER applied. Drives
- * both the HUD cost readout and actual spend at placement time.
+ * Current effective build cost for a placeable type. Costs are fixed
+ * base CAPEX values.
  */
 export function getCost(type: PlaceableBuildingType): number {
-  const base = BUILDINGS[type].baseCost;
-  const mult = state.wright[type].mult;
-  return Math.round(base * mult * ECONOMY.BUILDING_COST_MULTIPLIER);
+  return Math.round(BUILDINGS[type].baseCost);
 }
 
 /**
@@ -51,9 +51,8 @@ export function canBuild(type: BuildingType, regionId: string): boolean {
 /**
  * Place a Hydrogen Plant in a region. Deducts the current cost, records
  * the building, fans out position around the region centroid so icons
- * don't overlap, advances the Wright's Law curve (cost drops with each
- * doubling of cumulative capacity, floored by WRIGHT_SAVINGS_CAP), and
- * plays the construction sfx. Pipelines go through buildPipeline.
+ * don't overlap, and plays the construction sfx. Pipelines go through
+ * buildPipeline.
  */
 export function build(type: BuildingType, regionId: string): void {
   if (type === 'pipeline') return;
@@ -90,18 +89,6 @@ export function build(type: BuildingType, regionId: string): void {
   };
   state.buildings.push(b);
 
-  // Wright's Law: each doubling of cumulative units trims cost by the
-  // learning rate, down to a floor of (1 - WRIGHT_SAVINGS_CAP).
-  const w = state.wright[type];
-  w.cum += capacity || 1;
-  const lr = LEARNING[type];
-  const unitSize = capacity || 1;
-  const units = w.cum / unitSize;
-  if (units > 1) {
-    const exp = Math.log2(1 - lr);
-    w.mult = Math.max(1 - WRIGHT_SAVINGS_CAP, Math.pow(units, exp));
-  }
-
   playBuild();
   showToast(`${cfg.name} built in ${rc.name}!`);
   updateBuildCosts();
@@ -109,12 +96,20 @@ export function build(type: BuildingType, regionId: string): void {
 
 /**
  * Place a pipeline between two regions. Cost is baseCostPerKm × distance,
- * discounted by the minimum of the two regions' gas-infra factors (reusing
- * old corridors is cheaper — the core "reuse what exists" argument), and
- * scaled by the pipeline Wright's Law multiplier. Rejects duplicate
- * connections. Updates both regions' pipeConnections counters.
+ * discounted by the minimum of the two regions' gas-infra factors
+ * (reusing old corridors is cheaper — the core "reuse what exists"
+ * argument). Rejects duplicate connections. Updates both regions'
+ * pipeConnections counters.
  */
 export function buildPipeline(fromId: string, toId: string): void {
+  const haveRootNetwork = state.pipes.length > 0;
+  const fromConnected = (state.regions[fromId]?.pipeConnections ?? 0) > 0;
+  const toConnected = (state.regions[toId]?.pipeConnections ?? 0) > 0;
+  if (haveRootNetwork && !fromConnected && !toConnected) {
+    showToast('New pipelines must connect to the existing backbone.');
+    return;
+  }
+
   const exists = state.pipes.find(p =>
     (p.fromId === fromId && p.toId === toId) ||
     (p.fromId === toId && p.toId === fromId)
@@ -131,8 +126,7 @@ export function buildPipeline(fromId: string, toId: string): void {
   if (!fromCfg || !toCfg) return;
 
   const infraDiscount = 1.0 - (Math.min(fromCfg.gasInfra, toCfg.gasInfra) * 0.4);
-  const wMult = state.wright.pipeline.mult;
-  const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount * wMult);
+  const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount);
 
   if (state.money < cost) {
     showToast(`Not enough money! Need €${fmtMoney(cost)}`);
@@ -149,44 +143,118 @@ export function buildPipeline(fromId: string, toId: string): void {
     cost,
     maxFlow: cfg.maxFlow,
     flow: 0,
-    pressure: 30,
+    pressure: state.networkPressure,
     linepackCapacity: Math.round(cfg.linepackPerKm * dist),
     linepackStored: 0,
     builtDay: state.gameDay
   });
-
-  // First-pipeline-built tracker drives the Priority 4 grace window.
-  if (state.firstPipelineBuiltDay === null) state.firstPipelineBuiltDay = state.gameDay;
-
   state.regions[fromId].pipeConnections = (state.regions[fromId].pipeConnections || 0) + 1;
   state.regions[toId].pipeConnections = (state.regions[toId].pipeConnections || 0) + 1;
-
-  const w = state.wright.pipeline;
-  w.cum += dist;
-  const lr = LEARNING.pipeline;
-  const pipeUnits = w.cum / 200;
-  if (pipeUnits > 1) {
-    const exp = Math.log2(1 - lr);
-    w.mult = Math.max(1 - WRIGHT_SAVINGS_CAP, Math.pow(pipeUnits, exp));
-  }
 
   playBuild();
   showToast(`Pipeline: ${fromCfg.name} → ${toCfg.name} (${Math.round(dist)}km, €${fmtMoney(cost)})`);
   updateBuildCosts();
 }
 
+// ─── Production debug instrumentation (Shift+D) ──────────────────────────
+// Off by default. Toggled from input.ts. When on, updateProduction()
+// accumulates per-plant factors/MW/kg into `dailyStats` each tick, and
+// logProductionDebugIfActive() dumps a one-line-per-plant report at each
+// game-day boundary, plus rolls the plant's cumulative total forward so
+// the "is production hitting 6,000 kg/day?" check is answerable from the
+// browser console alone.
+
+interface PlantDailyStats {
+  factorSum: number;
+  mwSum: number;
+  kgSum: number;
+  ticks: number;
+}
+
+export const productionDebug = {
+  active: false,
+  dailyStats: new Map<number, PlantDailyStats>(),
+  cumulativeKg: new Map<number, number>()
+};
+
+export function toggleProductionDebug(): boolean {
+  productionDebug.active = !productionDebug.active;
+  if (!productionDebug.active) {
+    productionDebug.dailyStats.clear();
+  }
+  return productionDebug.active;
+}
+
 /**
- * Per-tick production pass for Hydrogen Plants. Each plant:
- *  1. Computes internal electricity generation from its weather-adjusted
- *     factor (solar/wind) or capacity-factor × nuclear bonus (nuclear).
- *  2. Passes that electricity through its integrated electrolyzer at
- *     ~70% efficiency to get kg/day of hydrogen.
- *  3. Adds the hydrogen to the region's supply. Only molecules leave the
- *     plant; `internalElectricity` is exposed for the renderer's
- *     electrons-to-molecules animation and the hover flow diagram.
+ * Emit one console line per plant summarising today's production. Also
+ * folds the day's kg into each plant's cumulative counter. Only runs
+ * when debug mode is on; called once per day-boundary from sim.tick.
+ */
+export function logProductionDebugIfActive(): void {
+  if (!productionDebug.active) return;
+  const s = state;
+  for (const b of s.buildings) {
+    if (b.type !== 'solarPlant' && b.type !== 'windPlant' && b.type !== 'nuclearPlant') continue;
+    const stats = productionDebug.dailyStats.get(b.id);
+    const rc = getRegionConfig(b.regionId);
+    const cfg = BUILDINGS[b.type];
+    const regionName = rc?.name ?? b.regionId;
+    const factorLabel = b.type === 'solarPlant' ? 'solarFactor'
+      : b.type === 'windPlant' ? 'windFactor'
+      : 'availability';
+    const avgFactor = stats && stats.ticks > 0 ? stats.factorSum / stats.ticks : 0;
+    const avgMW = stats && stats.ticks > 0 ? stats.mwSum / stats.ticks : 0;
+    const dailyKg = stats ? stats.kgSum : 0;
+    const cumulative = (productionDebug.cumulativeKg.get(b.id) ?? 0) + dailyKg;
+    productionDebug.cumulativeKg.set(b.id, cumulative);
+    // eslint-disable-next-line no-console
+    console.log(
+      `[day ${s.gameDay}] ${cfg.name} #${b.id} @ ${regionName}\n` +
+      `  nameplate: ${('capacity' in cfg ? cfg.capacity : 0)} MW\n` +
+      `  ${factorLabel} (today avg): ${avgFactor.toFixed(3)}\n` +
+      `  internalMW (today avg): ${avgMW.toFixed(1)}\n` +
+      `  dailyKg: ${Math.round(dailyKg).toLocaleString()}\n` +
+      `  cumulativeKg: ${Math.round(cumulative).toLocaleString()}`
+    );
+  }
+  productionDebug.dailyStats.clear();
+}
+
+/**
+ * Is a nuclear plant currently in its planned refuelling outage?
+ * Each plant has a phase-offset so outages are spread across the fleet
+ * (not all reactors offline at once). With 75-day outage in a 270-day
+ * cycle → ~27.8% outage ≈ 72.2% availability, matching RTE's published
+ * French reactor-fleet CF of ~0.72.
+ */
+function nuclearAvailability(b: Building, gameDay: number): number {
+  const offset = (b.id * NUCLEAR_FLEET_PHASE_OFFSET) % NUCLEAR_CYCLE_DAYS;
+  const cycleDay = (gameDay + offset) % NUCLEAR_CYCLE_DAYS;
+  return cycleDay < NUCLEAR_OUTAGE_DAYS ? 0 : 1;
+}
+
+/**
+ * Per-tick production pass — v5 instantaneous model. No capacity-factor
+ * multiplier is applied; real CFs emerge from day/night, weather, and
+ * the nuclear outage schedule.
  *
- * There is no separate curtailment step — any unused electricity stays
- * inside the plant and is simply wasted there, counted as lost production.
+ * For each plant:
+ *   Solar:   electricity_MW = nameplate × solarFactor
+ *              where solarFactor = solarBase × seasonal × solarCurve × cloudMult
+ *              (all four baked into rs.solarFactor by weather.ts).
+ *              Peak Occitanie solar noon clear sky ≈ 100 × 1.25 = 125 MW.
+ *              Midnight: 0 MW. Winter noon clear: ≈ 50-60 MW.
+ *   Wind:    electricity_MW = min(nameplate, nameplate × windFactor)
+ *              where windFactor = windBase × seasonal × windPower
+ *              (all baked into rs.windFactor). Hard-capped at nameplate
+ *              to reflect turbine electrical limits — the "coastal bonus"
+ *              means the plant reaches cap more often, not that it
+ *              exceeds it.
+ *   Nuclear: electricity_MW = nameplate × nuclearAvailability
+ *              0 during outage, nameplate otherwise. No weather.
+ *
+ * Hydrogen output uses the shared formula:
+ *   h2_kg_per_day = electricity_MW × 24 × 1000 × EFFICIENCY / KWH_PER_KG_H2
  */
 export function updateProduction(): void {
   const s = state;
@@ -196,8 +264,6 @@ export function updateProduction(): void {
     s.regions[rc.id].supply = 0;
   }
 
-  let totalCurtailed = 0;
-
   for (const b of s.buildings) {
     const rs = s.regions[b.regionId];
     const rc = getRegionConfig(b.regionId);
@@ -205,48 +271,60 @@ export function updateProduction(): void {
 
     if (b.type === 'solarPlant' || b.type === 'windPlant' || b.type === 'nuclearPlant') {
       const cfg = BUILDINGS[b.type] as HydrogenPlantConfig;
-      // Internal generator output in MW-equivalent
+      const nameplate = cfg.baseOutput; // nameplate MW
+
+      // v5.1: every multiplier in the chain (regional bonus, seasonal,
+      // day/night, cloud/wind noise) is bounded [0, 1], so solarFactor
+      // and windFactor are ≤ 1.0 by construction. Peak output is
+      // therefore ≤ nameplate at the data level — no min() clip needed.
       let genFactor = 0;
       if (b.type === 'solarPlant') genFactor = rs.solarFactor ?? 0;
       else if (b.type === 'windPlant') genFactor = rs.windFactor ?? 0;
-      else genFactor = cfg.capacityFactor * (rc.nuclearBonus ?? 1);
-
-      const internalMW = cfg.baseOutput * genFactor;
+      else genFactor = nuclearAvailability(b, s.gameDay);
+      const internalMW = nameplate * genFactor;
       b.internalElectricity = internalMW;
 
-      // Max electrolyzer throughput is the plant's own generator cap.
-      const internalMWh = internalMW * 24;
-      const h2Produced = (internalMWh * 1000 / cfg.kwhPerKg) * cfg.electrolyzerEfficiency;
+      const h2Produced = internalMW * 24 * 1000 * ELECTROLYZER_EFFICIENCY / KWH_PER_KG_H2;
 
       b.production = h2Produced;
       rs.supply += h2Produced;
       s.totalH2Produced += h2Produced / TICKS_PER_DAY;
-      rs.electricity += 0; // Hydrogen plants contribute no grid electricity.
+
+      if (productionDebug.active) {
+        const prev = productionDebug.dailyStats.get(b.id)
+          ?? { factorSum: 0, mwSum: 0, kgSum: 0, ticks: 0 };
+        prev.factorSum += genFactor;
+        prev.mwSum += internalMW;
+        prev.kgSum += h2Produced / TICKS_PER_DAY;
+        prev.ticks += 1;
+        productionDebug.dailyStats.set(b.id, prev);
+      }
 
       if (rs.pipeConnections > 0 && Math.random() < 0.02) {
         spawnPressurePulse(b.regionId, 'inject', Math.min(1, h2Produced / 2000));
       }
     }
   }
+}
 
-  // Any residual region-level electricity (none, since plants consume
-  // internally) would count here; keep the counter wired for v2 saves.
-  for (const rc of REGIONS) {
-    const rs = s.regions[rc.id];
-    if (rs.electricity > 0) totalCurtailed += rs.electricity;
+/** Per-type daily OPEX fraction = annual fraction / 365. */
+function dailyOpexFractionFor(type: PlaceableBuildingType): number {
+  switch (type) {
+    case 'solarPlant':   return OPEX_ANNUAL_FRACTION.SOLAR_PLANT / 365;
+    case 'windPlant':    return OPEX_ANNUAL_FRACTION.WIND_PLANT / 365;
+    case 'nuclearPlant': return OPEX_ANNUAL_FRACTION.NUCLEAR_PLANT / 365;
   }
-  s.totalCurtailed += totalCurtailed / TICKS_PER_DAY;
 }
 
 /**
- * Sum of daily opex across every live building + pipeline. Stored on
- * `state.dailyOpex` so the HUD can read a stable number without
- * recomputing inside the render loop.
+ * Sum of daily opex across every live building + pipeline. v5: buildings
+ * use per-type annual OPEX fractions sourced from IRENA/IEA real-world
+ * references. Pipelines use the same annual-fraction model.
  */
 export function computeDailyOpex(): number {
   let opex = 0;
-  for (const b of state.buildings) opex += b.cost * ECONOMY.DAILY_OPEX_FRACTION;
-  for (const p of state.pipes) opex += p.cost * ECONOMY.DAILY_OPEX_FRACTION;
+  for (const b of state.buildings) opex += b.cost * dailyOpexFractionFor(b.type);
+  for (const p of state.pipes) opex += p.cost * (OPEX_ANNUAL_FRACTION.PIPELINE / 365);
   return opex;
 }
 

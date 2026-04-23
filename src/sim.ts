@@ -1,8 +1,7 @@
-import { applyOpex, updateProduction } from './buildings';
+import { applyOpex, logProductionDebugIfActive, updateProduction } from './buildings';
 import { ECONOMY, TICKS_PER_DAY } from './config';
 import { checkEmergence, updateCustomers } from './customers';
-import { updateEcon } from './econ';
-import { triggerGameOver, updateEndgame } from './endgame';
+import { sampleFinance, sampleSupplyDemand, updateEcon } from './econ';
 import { checkInsights } from './insights';
 import { solvePressure } from './pressure';
 import { autoSave } from './save';
@@ -56,6 +55,8 @@ export function tick(): void {
   applyOpex();
   checkEmergence();
   updateCustomers();
+  sampleSupplyDemand();
+  sampleFinance();
 
   // v4 bankruptcy watchdog: track consecutive days in the red; trigger
   // game over after the grace period expires.
@@ -63,21 +64,19 @@ export function tick(): void {
     if (s.money < ECONOMY.BANKRUPTCY_THRESHOLD) {
       s.daysBelowBankruptcyThreshold++;
       if (s.daysBelowBankruptcyThreshold >= ECONOMY.BANKRUPTCY_GRACE_DAYS) {
-        triggerGameOver('bankruptcy');
+        s.gameOver = { triggered: true, reason: 'bankruptcy', day: s.gameDay };
+        s.paused = true;
       }
     } else {
       s.daysBelowBankruptcyThreshold = 0;
     }
   }
 
-  // Day-boundary bookkeeping: milestone insights + narrative arc + autosave.
+  // Day-boundary bookkeeping: insights + autosave.
   if (s.tick % TICKS_PER_DAY === 0) {
     checkInsights();
-    updateEndgame();
+    logProductionDebugIfActive();
   }
-  // updateEndgame also ticks each frame's cinematic timeout when the
-  // day boundary hasn't hit — cheap enough to always call.
-  if (state.endgame.cinematicStage !== 'none') updateEndgame();
 
   autoSave();
 }

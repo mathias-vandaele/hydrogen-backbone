@@ -7,6 +7,7 @@ import { initInput } from './input';
 import { startLoop } from './loop';
 import { initMap } from './map';
 import { initParticles } from './particles';
+import { logCustomerSlotDiagnostics } from './customers';
 import { loadFromStorageIfPresent, loadGame, rebuildPipeConnections, resetGame, saveGame } from './save';
 import { setSpeed } from './sim';
 import { initTutorial } from './tutorial';
@@ -51,6 +52,7 @@ function boot(): void {
   wireTopBar();
 
   rebuildPipeConnections();
+  logCustomerSlotDiagnostics();
 
   startLoop();
 

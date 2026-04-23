@@ -1,4 +1,4 @@
-import { REGIONS, START_MONEY } from './config';
+import { CUSTOMER_TYPES, REGIONS, START_MONEY } from './config';
 import type { CustomerType, GameState, RegionState } from './types';
 
 /**
@@ -17,12 +17,14 @@ export function createInitialState(): GameState {
       localPrice: 6.0,
       satisfaction: 0,
       pipeConnections: 0,
-      reliabilityDays: 0
+      reliabilityDays: 0,
+      supplySamples: [],
+      demandSamples: [],
+      sampleIndex: 0
     };
   }
-  const thresholdCrossings: Record<CustomerType, number | null> = {
-    steel: null, ammonia: null, efuel: null, chemical: null, fuelcell: null, export: null
-  };
+  const customerTypes = Object.keys(CUSTOMER_TYPES) as CustomerType[];
+  const thresholdCrossings = Object.fromEntries(customerTypes.map(type => [type, null])) as Record<CustomerType, number | null>;
   return {
     tick: 0,
     gameDay: 1,
@@ -34,28 +36,24 @@ export function createInitialState(): GameState {
     totalRevenue: 0,
     dailyRevenue: 0,
     dailyOpex: 0,
+    revenueSamples: [],
+    opexSamples: [],
+    financeSampleIndex: 0,
     spotPrice: 6.0,
     priceHistory: [],
     pressureHistory: [],
     budgetHistory: [],
     daysBelowBankruptcyThreshold: 0,
-    firstPipelineBuiltDay: null,
     gameOver: null,
-    priceEMA: 6.0,
-    lastCustomerEmergenceDay: -999,
     pendingCustomers: [],
     thresholdCrossings,
-    surplusStreakDays: 0,
     totalH2Produced: 0,
     totalH2Sold: 0,
-    totalCurtailed: 0,
+    networkHydrogenStored: 0,
     networkPressure: 0,
-    wright: {
-      solarPlant: { cum: 0, mult: 1.0 },
-      windPlant: { cum: 0, mult: 1.0 },
-      nuclearPlant: { cum: 0, mult: 1.0 },
-      pipeline: { cum: 0, mult: 1.0 }
-    },
+    supplySamples: [],
+    demandSamples: [],
+    supplyDemandSampleIndex: 0,
     regions,
     buildings: [],
     pipes: [],
@@ -69,20 +67,8 @@ export function createInitialState(): GameState {
     lastInsightDay: 0,
     milestones: {
       firstCustomer: false,
-      curtailment100: false,
       priceBelow3: false,
       tenPipes: false
-    },
-    endgame: {
-      phase: 'pre',
-      oilParityStreak: 0,
-      oilParityReachedOnDay: null,
-      escapeVelocityStreak: 0,
-      escapeVelocityReachedOnDay: null,
-      cinematicStage: 'none',
-      cinematicStartedAt: 0,
-      endScreenVisible: false,
-      manualTrigger: false
     },
     lastSavedAt: 0,
     version: 4

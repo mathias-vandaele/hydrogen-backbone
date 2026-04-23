@@ -26,7 +26,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'Step 3: Watch the Price Descend',
-    text: 'As the backbone grows, price descends through a staircase of thresholds — each a type of customer that emerges on its own logic: industry needs cheap H₂, e-fuel soaks up high pressure, fuel-cell stations trust reliable supply, export terminals arrive when surplus is sustained.\n\nYour target: oil parity (€4.5/kg) → escape velocity.\n\nSpeed: 1×/2×/3× or 1/10/100. Space pauses.',
+    text: 'As the backbone grows, price descends through a staircase of thresholds. Small customers commit first, then mids, then big anchor loads once the network can prove it has spare 24h supply to serve them.\n\nWatch price, pressure, and customer tiers together as the network scales.\n\nSpeed: 1×/2×/3× or 1/10/100. Space pauses.',
     btn: 'Start Playing!'
   }
 ];

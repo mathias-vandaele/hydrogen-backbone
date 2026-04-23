@@ -2,9 +2,9 @@
 // (Priority 3): threshold lines per price-gated customer type, animated
 // flashes when the live price crosses a threshold downward, customer-icon
 // markers at each materialization point, and a dashed forward projection
-// that extrapolates 120 days via Wright's Law momentum.
+// that extrapolates 120 days from recent price momentum.
 
-import { CUSTOMER_TYPES, ECONOMY, OIL_PARITY_THRESHOLD } from './config';
+import { CUSTOMER_TYPES, ECONOMY } from './config';
 import { state } from './state';
 import type { CustomerType } from './types';
 
@@ -112,7 +112,7 @@ const FLASH_MS = 2000;
 /**
  * Draw the price-trajectory chart: history line + area fill, horizontal
  * threshold lines for each price-gated customer (with right-edge icon +
- * name), oil-parity and global-export highlighted, dashed forward
+ * name), highlighted export line, dashed forward
  * projection 120 days out, and small customer icons at materialization
  * points.
  */
@@ -172,7 +172,7 @@ export function drawPriceChart(
   ctx.stroke();
 
   // Forward projection: simple linear extrapolation of the last N days'
-  // slope biased toward Wright's Law expected monthly decay. Dashed.
+  // slope projected from recent downward momentum. Dashed.
   drawProjection(ctx, history, toX, toY, projectionDays);
 
   // Customer emergence markers on the history
@@ -197,8 +197,8 @@ export function drawPriceChart(
 }
 
 /**
- * Draw one horizontal line per price-gated customer type. Oil parity
- * (e-fuel) and Global export get highlighted styling. Label column at
+ * Draw one horizontal line per customer type. Export gets highlighted
+ * styling. Label column at
  * the right edge shows icon + short name.
  */
 function drawThresholdLines(
@@ -222,18 +222,15 @@ function drawThresholdLines(
     const flashT = flashStart ? Math.max(0, 1 - (now - flashStart) / FLASH_MS) : 0;
 
     // Highlighted stops
-    const isOilParity = type === 'efuel';
-    const isExport = type === 'export';
-    const oilReached = state.endgame.oilParityReachedOnDay !== null;
+    const isExport = cfg.archetype === 'export' && cfg.tier === 'big';
 
     let stroke = 'rgba(6,214,160,0.28)';
-    if (isOilParity) stroke = oilReached ? 'rgba(0,255,136,0.75)' : 'rgba(245,158,11,0.7)';
-    else if (isExport) stroke = 'rgba(6,214,160,0.55)';
+    if (isExport) stroke = 'rgba(6,214,160,0.55)';
     if (flashT > 0) stroke = `rgba(255,255,255,${0.3 + 0.6 * flashT})`;
 
     ctx.strokeStyle = stroke;
-    ctx.lineWidth = isOilParity || isExport ? 1.3 : 0.8;
-    ctx.setLineDash(isOilParity || isExport ? [] : [3, 3]);
+    ctx.lineWidth = isExport ? 1.3 : 0.8;
+    ctx.setLineDash(isExport ? [] : [3, 3]);
     ctx.beginPath();
     ctx.moveTo(innerX, y);
     ctx.lineTo(innerX + innerW, y);
@@ -244,17 +241,14 @@ function drawThresholdLines(
     ctx.fillStyle = stroke;
     ctx.textAlign = 'left';
     let label = `${cfg.icon} ${cfg.name}`;
-    if (isOilParity) label = '⛽ Oil parity';
-    else if (isExport) label = '🚢 Global export';
+    if (isExport) label = '🚢 Global export';
     ctx.fillText(`${label} €${threshold.toFixed(1)}`, innerX + innerW + 4, y);
   }
   ctx.restore();
 }
 
 /**
- * Extrapolate price 120 days forward using recent slope, biased toward
- * Wright's Law monthly savings (so the projection embodies the flywheel
- * rather than raw momentum).
+ * Extrapolate price 120 days forward using recent downward slope.
  */
 function drawProjection(
   ctx: CanvasRenderingContext2D,
@@ -268,11 +262,8 @@ function drawProjection(
   const lastIdx = history.length - 1;
   const last = history[lastIdx];
   const prev = history[Math.max(0, lastIdx - 14)];
-  // Blend raw slope with Wright's Law expected monthly decay (~3%/month
-  // baseline). Clamp so a rising recent slope doesn't invert.
   const rawDailySlope = (last - prev) / 14;
-  const wrightBias = -last * 0.001; // ~3%/month downward push
-  const dailySlope = Math.min(0, Math.min(rawDailySlope, wrightBias));
+  const dailySlope = Math.min(0, rawDailySlope);
 
   ctx.save();
   ctx.strokeStyle = 'rgba(6, 214, 160, 0.55)';
@@ -317,19 +308,6 @@ function drawCustomerMarkers(
     ctx.fillText(CUSTOMER_TYPES[c.type].icon, toX(idx), toY(priceAt) - 8);
   }
   ctx.restore();
-}
-
-/**
- * Path-to-Oil-Parity progress in 0..1. Start price is whatever the
- * spot was at session start (~6.0), target is OIL_PARITY_THRESHOLD.
- */
-export function pathToOilParity(): number {
-  const s = state;
-  const start = 6.0;
-  const target = OIL_PARITY_THRESHOLD;
-  if (s.spotPrice <= target) return 1;
-  if (s.spotPrice >= start) return 0;
-  return (start - s.spotPrice) / (start - target);
 }
 
 // ─── Budget history chart (v4, Priority 3) ───────────────────────────────

@@ -11,7 +11,15 @@ export type BuildingType =
   | 'pipeline';
 export type PlaceableBuildingType = Exclude<BuildingType, 'pipeline'>;
 export type PlantKind = 'solar' | 'wind' | 'nuclear';
-export type CustomerType = 'steel' | 'ammonia' | 'efuel' | 'chemical' | 'fuelcell' | 'export';
+export type CustomerArchetype = 'steel' | 'ammonia' | 'efuel' | 'chemical' | 'fuelcell' | 'export';
+export type CustomerTier = 'small' | 'mid' | 'big';
+export type CustomerType =
+  | 'steel_small' | 'steel_mid' | 'steel_big'
+  | 'ammonia_small' | 'ammonia_mid' | 'ammonia_big'
+  | 'efuel_small' | 'efuel_mid' | 'efuel_big'
+  | 'chemical_small' | 'chemical_mid' | 'chemical_big'
+  | 'fuelcell_small' | 'fuelcell_mid' | 'fuelcell_big'
+  | 'export_small' | 'export_mid' | 'export_big';
 
 /**
  * Bundled Hydrogen Plant config — generator + integrated electrolyzer
@@ -23,10 +31,9 @@ export interface HydrogenPlantConfig {
   name: string;
   icon: string;
   kind: PlantKind;
-  capacity: number;      // generator nameplate MW (for display/Wright units)
+  capacity: number;      // generator nameplate MW
   baseCost: number;
   baseOutput: number;    // nameplate electricity MW used internally
-  capacityFactor: number;
   electrolyzerEfficiency: number;  // 0..1 (electron → molecule ratio)
   kwhPerKg: number;
   quote: string;
@@ -49,41 +56,27 @@ export interface BuildingsConfigMap {
   pipeline: PipelineConfig;
 }
 
-// ─── Emergence gates (Priority 2) ────────────────────────────────────────
-// Each customer archetype embodies a distinct argument from the manifesto.
-// `priceThreshold` = classic price-elastic industrial demand.
-// `pressureRelief` = network-pressure-driven buffer consumption (e-fuel).
-// `supplyReliability` = emerges where the backbone has proven reliable
-//   (municipal fuel-cell stations, permissionless distributed demand).
-// `domesticSurplus` = export terminal that only makes sense when domestic
-//   supply reliably exceeds domestic demand.
-
-export type EmergenceGate =
-  | { kind: 'priceThreshold'; threshold: number }
-  | { kind: 'pressureRelief'; minPressure: number }
-  | { kind: 'supplyReliability'; minUptimeDays: number }
-  | { kind: 'domesticSurplus'; minSurplusRatio: number; minSurplusDays: number };
-
 // The slot-kind a customer consumes on its host region.
 export type SlotKind = 'industrial' | 'distributed' | 'port' | 'efuel';
 
 export interface CustomerTypeConfig {
+  archetype: CustomerArchetype;
+  tier: CustomerTier;
   name: string;
   icon: string;
   color: string;
-  /** Nominal price threshold used for chart annotation and local pricing.
-   *  Actual emergence is driven by `emergenceGate`. */
+  /** Nominal price threshold used for chart annotation and emergence. */
   priceThreshold: number;
   demandMin: number;
   demandMax: number;
-  weight: number;
+  expectedDemand: number;
   minPipeConnections: number;
   pressureRelief?: boolean;
   requiresPort?: boolean;
   slotKind: SlotKind;
-  investmentLagDays: number;
+  investmentLagMinDays: number;
+  investmentLagMaxDays: number;
   rampDurationDays: number;
-  emergenceGate: EmergenceGate;
   quote: string;
 }
 
@@ -148,6 +141,12 @@ export interface RegionState {
   /** Consecutive days this region has been pipe-connected with positive
    *  supply — used by the `supplyReliability` emergence gate. */
   reliabilityDays: number;
+  /** Rolling 24h ring buffer of this region's instantaneous supply (kg/day
+   *  rate) — shares the same tick boundary and length as the network-wide
+   *  buffers on GameState. */
+  supplySamples?: number[];
+  demandSamples?: number[];
+  sampleIndex?: number;
 }
 
 export interface Building {
@@ -160,7 +159,7 @@ export interface Building {
   builtDay: number;
   production: number;
   /** Total CAPEX paid to place this building. Opex each day is a fraction
-   *  of this amount (see config.ECONOMY.DAILY_OPEX_FRACTION). Populated at
+   *  of this amount (see config.OPEX_ANNUAL_FRACTION). Populated at
    *  placement time in buildings.ts; backfilled from base cost for old saves. */
   cost: number;
   /** Internal electricity MW the plant is generating right now, used for
@@ -222,46 +221,10 @@ export interface PendingCustomer {
   targetDemand: number;
 }
 
-export interface WrightCurve {
-  cum: number;
-  mult: number;
-}
-
-export interface WrightState {
-  solarPlant: WrightCurve;
-  windPlant: WrightCurve;
-  nuclearPlant: WrightCurve;
-  pipeline: WrightCurve;
-}
-
 export interface MilestoneFlags {
   firstCustomer: boolean;
-  curtailment100: boolean;
   priceBelow3: boolean;
   tenPipes: boolean;
-}
-
-/** Two-stage narrative arc state (Priority 5). */
-export type EndgamePhase = 'pre' | 'oilParity' | 'escapeVelocity' | 'ended';
-export type CinematicStage = 'none' | 'oilParity' | 'escapeVelocity';
-
-export interface EndgameState {
-  phase: EndgamePhase;
-  /** Rolling counter: consecutive days priceEMA <= e-fuel threshold. Fires
-   *  oil-parity cinematic at 30. */
-  oilParityStreak: number;
-  oilParityReachedOnDay: number | null;
-  /** Rolling counter: consecutive days all Stage 2 conditions hold. Fires
-   *  escape-velocity cinematic at 20. */
-  escapeVelocityStreak: number;
-  escapeVelocityReachedOnDay: number | null;
-  /** Which cinematic (if any) the renderer should overlay. */
-  cinematicStage: CinematicStage;
-  cinematicStartedAt: number;
-  endScreenVisible: boolean;
-  /** If true, the player clicked "Witness the flywheel" manually rather
-   *  than letting the auto-trigger fire. */
-  manualTrigger: boolean;
 }
 
 /** v4: bankruptcy lose-condition state. */
@@ -283,6 +246,10 @@ export interface GameState {
   dailyRevenue: number;
   /** Running daily opex total (computed in buildings.ts, read by UI). */
   dailyOpex: number;
+  /** Rolling 24h samples of day-rate revenue and opex for HUD smoothing. */
+  revenueSamples: number[];
+  opexSamples: number[];
+  financeSampleIndex: number;
   spotPrice: number;
   priceHistory: number[];
   pressureHistory: number[];
@@ -290,28 +257,22 @@ export interface GameState {
   budgetHistory: number[];
   /** Days in a row the budget has sat below BANKRUPTCY_THRESHOLD. */
   daysBelowBankruptcyThreshold: number;
-  /** Game-day when the player's first pipeline was placed (drives the
-   *  first-customer grace window). */
-  firstPipelineBuiltDay: number | null;
   /** Populated when bankruptcy grace expires; the game-over screen reads it. */
   gameOver: GameOverState | null;
-  /** Exponentially weighted moving average of spot price, decay ~0.97/day.
-   *  The lagged-commitment model uses this rather than the raw spot price
-   *  so single-tick dips don't trigger investment commitments. */
-  priceEMA: number;
-  /** Day of the last pending-customer creation — enforces
-   *  GLOBAL_EMERGENCE_COOLDOWN_DAYS across the whole map. */
-  lastCustomerEmergenceDay: number;
   pendingCustomers: PendingCustomer[];
   thresholdCrossings: Record<CustomerType, number | null>;
-  /** Rolling counter: consecutive days of national surplus ratio ≥
-   *  export gate's minSurplusRatio. Feeds the `domesticSurplus` gate. */
-  surplusStreakDays: number;
   totalH2Produced: number;
   totalH2Sold: number;
-  totalCurtailed: number;
+  networkHydrogenStored: number;
   networkPressure: number;
-  wright: WrightState;
+  /** Ring buffer of recent total-supply samples (kg/day rate), one per sim
+   *  tick. Length equals TICKS_PER_DAY, so when full it covers exactly
+   *  24 game-hours — the rolling window behind the HUD's averaged readout. */
+  supplySamples: number[];
+  /** Matching buffer for total demand, sampled at the same tick boundary. */
+  demandSamples: number[];
+  /** Write position into both sample buffers; wraps at their length. */
+  supplyDemandSampleIndex: number;
   regions: Record<string, RegionState>;
   buildings: Building[];
   pipes: Pipe[];
@@ -324,7 +285,6 @@ export interface GameState {
   insightIndex: number;
   lastInsightDay: number;
   milestones: MilestoneFlags;
-  endgame: EndgameState;
   lastSavedAt: number;
   version: number;
 }

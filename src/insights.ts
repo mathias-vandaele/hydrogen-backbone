@@ -6,7 +6,6 @@
 // a minimum-day floor AND a volume floor so short-term spikes can't
 // trigger a pop-up.
 
-import { NARRATIVE } from './config';
 import { state } from './state';
 import { showManifesto } from './ui';
 import type { Insight } from './types';
@@ -17,9 +16,8 @@ interface Milestone {
   insight: Insight;
 }
 
-// Minimum-day floors are relative to NARRATIVE.ACT_2_MIN_DAY where the
-// "real game" begins; setup-phase insights are suppressed.
-const EARLIEST_INSIGHT_DAY = Math.floor(NARRATIVE.ACT_2_MIN_DAY * 0.5); // Day 90
+const EARLIEST_INSIGHT_DAY = 90;
+const PRICE_INSIGHT_MIN_PRODUCTION_KG = 5_000;
 
 const MILESTONES: Milestone[] = [
   {
@@ -34,25 +32,14 @@ const MILESTONES: Milestone[] = [
     }
   },
   {
-    key: 'curtailment100',
-    // Require 500 MWh (5× the old threshold) plus Day 90 — curtailment
-    // only "scandal"-worthy at meaningful volumes and after the game
-    // has really begun.
-    check: () => state.gameDay >= EARLIEST_INSIGHT_DAY && state.totalCurtailed > 500,
-    insight: {
-      title: 'The Curtailment Scandal',
-      text: 'You just saved enough renewable electricity to equal a small town\'s daily consumption — electricity that today, without the backbone, is thrown away as "curtailment." The hydrogen network eliminates curtailment structurally: there is always somewhere for the electron to go.'
-    }
-  },
-  {
     key: 'priceBelow3',
-    // Replaces the v3 "€3/kg" trigger — now gated on priceEMA (not a
-    // single-tick spot) plus a production floor plus the day floor.
+    // Replaces the v3 "€3/kg" trigger — gated on actual spot price plus
+    // a production floor plus the day floor.
     check: () =>
       state.gameDay >= EARLIEST_INSIGHT_DAY &&
-      state.priceEMA < 3.0 &&
+      state.spotPrice < 3.0 &&
       state.priceHistory.length > 30 &&
-      totalDailyProduction() >= NARRATIVE.OIL_PARITY_MIN_PRODUCTION_KG,
+      totalDailyProduction() >= PRICE_INSIGHT_MIN_PRODUCTION_KG,
     insight: {
       title: 'The Oil Price Ceiling Is Closing',
       text: 'H₂ below €3/kg and a real market behind it. At this level, e-fuels become competitive with oil — and keep falling. The fossil fuel industry does not need to be banned. It gets priced out. Quietly, permanently, by the flywheel you are spinning.'
@@ -90,7 +77,6 @@ export function checkInsights(): void {
   }
 }
 
-/** Mirror of endgame.ts's helper — keep insights independent from the arc. */
 function totalDailyProduction(): number {
   let kg = 0;
   for (const b of state.buildings) kg += b.production;

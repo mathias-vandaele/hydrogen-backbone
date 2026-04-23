@@ -55,10 +55,23 @@ export function updateWeather(): void {
   const doy = s.dayOfYear;
   const t = s.timeOfDay;
 
-  // Seasonal multipliers (existing behavior preserved)
-  const seasonalSolar = 0.45 + 0.55 * Math.max(0, Math.sin((doy - 80) * 2 * Math.PI / 365));
+  // v5.1 seasonal multipliers: peak 1.0, floor lifted so annual-average
+  // solar/wind output for a bonus-1.0 region lands on real French CFs
+  // (solar ~18%, wind ~32%) WITHOUT any factor of the formula needing to
+  // exceed 1.0 at peak. Every multiplier in the chain is bounded ≤ 1.0,
+  // so plant output is bounded by nameplate at the data level — no
+  // downstream clipping required.
+  const seasonalSolar = 0.6 + 0.4 * Math.max(0, Math.sin((doy - 80) * 2 * Math.PI / 365));
   const seasonalWind = 0.65 + 0.35 * Math.max(0, Math.sin((doy - 350) * 2 * Math.PI / 365 + Math.PI));
-  const solarCurve = Math.max(0, Math.sin(t * Math.PI));
+
+  // v5.1 day/night curve: properly zero during the night half of the day.
+  // t in [0.25, 0.75] is daylight (dawn to dusk); a half-sine peaks at
+  // noon. Outside that window the plant produces nothing. Previous
+  // formula `max(0, sin(t×π))` had solar active for all 24 hours and
+  // roughly doubled the real CF.
+  const solarCurve = t >= 0.25 && t <= 0.75
+    ? Math.sin((t - 0.25) / 0.5 * Math.PI)
+    : 0;
 
   const wt = weatherTime();
 
@@ -68,15 +81,22 @@ export function updateWeather(): void {
 
     const rs = s.regions[rc.id];
 
-    // Cloud cover multiplies solar output: heavy clouds knock solar to ~30%.
-    const cloudMult = 1 - 0.7 * sample.clouds;
+    // v5.1 cloud impact: heavy-cloud day drops solar to 60% (1 − 0.4).
+    // Reduced from the old 0.7 coefficient so avg cloudMult ≈ 0.8 —
+    // the stronger "clouds kill solar" model was over-penalising the
+    // fleet-average relative to published CFs (real cloud attenuation
+    // is site-dependent; 0.4 is the empirical sweet spot for French
+    // annual CFs in this sim).
+    const cloudMult = 1 - 0.4 * sample.clouds;
     rs.solarFactor = rc.solarBase * seasonalSolar * solarCurve * cloudMult;
 
-    // Wind power curves cubically with wind speed up to a cap; above nominal
-    // wind (sample.wind >= 1), output saturates a bit above 1.
-    const w = Math.min(1.4, sample.wind);
-    const windPower = w <= 1 ? Math.pow(w, 2.5) : 1 + (w - 1) * 0.3;
-    rs.windFactor = rc.windBase * seasonalWind * windPower;
+    // v5.1 wind: `sample.wind` is fraction of rated output, capped at 1.0
+    // (turbines never exceed their electrical nameplate). `windBase`,
+    // `seasonalWind`, and `sample.wind` are all ≤ 1.0, so the product is
+    // ≤ 1.0 and the downstream `nameplate × windFactor` formula in
+    // buildings.ts automatically respects the installed ceiling — no
+    // min() clip needed.
+    rs.windFactor = rc.windBase * seasonalWind * Math.min(1.0, sample.wind);
   }
 }
 
@@ -96,7 +116,13 @@ function sampleWeather(rc: RegionConfig, t: number): WeatherSample {
   const clouds = Math.max(0, Math.min(1, (raw + 1) * 0.5));
 
   const wraw = windMagNoise(lon * LON_SCALE * 1.3, lat * LAT_SCALE * 1.3, t * 1.1);
-  const wind = Math.max(0, Math.min(1.5, (wraw + 0.6) * 0.75 + rc.windBase * 0.3));
+  // v5.1 wind amplitude bumped so mean(sample.wind) ≈ 0.42, capped at 1.0.
+  // Combined with the [0, 1] regional bonus rescale, a windBase=1.0 region
+  // (Bretagne / Normandie / HdF) now averages windFactor ≈ 0.32 → 32% CF,
+  // matching RTE published French wind-fleet capacity factors. The cap
+  // at 1.0 enforces the physical nameplate ceiling at the noise-field
+  // level rather than needing a clip in buildings.ts.
+  const wind = Math.max(0, Math.min(1.0, (wraw + 0.5) * 0.85));
 
   const draw = windDirNoise(lon * LON_SCALE * 0.6, lat * LAT_SCALE * 0.6, t * 0.4);
   const windDirection = (draw + 1) * Math.PI;

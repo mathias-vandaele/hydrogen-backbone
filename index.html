@@ -55,35 +55,11 @@
   <div id="region-tooltip"></div>
   <div id="build-tooltip"></div>
 
-  <!-- Path-to-Parity / Path-to-Escape-Velocity progress bar. -->
-  <div id="parity-bar">
-    <div class="parity-label" id="parity-label">Path to Oil Parity</div>
-    <div class="parity-track">
-      <div class="parity-fill" id="parity-fill"></div>
-    </div>
-    <div class="parity-readout" id="parity-readout">€6.00 → €4.50</div>
-    <button id="witness-btn" style="display:none">Witness the flywheel</button>
-  </div>
-
-  <!-- End screen (shown after the escape-velocity cinematic completes). -->
-  <div id="end-screen">
-    <div class="end-box">
-      <h2>Escape Velocity Reached.</h2>
-      <p class="end-sub">The flywheel is self-sustaining.</p>
-      <div id="end-stats"></div>
-      <div class="end-actions">
-        <button id="end-continue">Continue building (sandbox)</button>
-        <button id="end-newgame">New game</button>
-        <button id="end-share">Share</button>
-      </div>
-    </div>
-  </div>
-
   <div id="status-bar">
     <div class="status-group status-production">
-      <div class="stat">Supply: <span class="stat-val" id="stat-supply">0</span> kg/day</div>
-      <div class="stat">Demand: <span class="stat-val" id="stat-demand">0</span> kg/day</div>
-      <div class="stat">Curtailed: <span class="stat-val" id="stat-curtail">0</span> kg/day</div>
+      <div class="stat">Power (now): <span class="stat-val" id="stat-power-now">0</span> MW</div>
+      <div class="stat">Supply (24h avg): <span class="stat-val" id="stat-supply">0</span> kg/day <span class="stat-now" id="stat-supply-now"></span></div>
+      <div class="stat">Demand (24h avg): <span class="stat-val" id="stat-demand">0</span> kg/day <span class="stat-now" id="stat-demand-now"></span></div>
     </div>
     <div class="status-group status-economy">
       <div class="stat">Revenue: <span class="stat-val good" id="stat-revenue">+€0/day</span></div>
@@ -91,11 +67,8 @@
       <div class="stat">Net: <span class="stat-val" id="stat-net">€0/day</span></div>
     </div>
     <div class="status-group status-network">
-      <div class="stat">Wright: <span class="stat-val" id="stat-wright">0%</span></div>
-      <div class="stat" title="Oil price at which e-fuel production becomes profitable at current H₂ spot price">
-        Oil Ceiling: <span class="stat-val" id="stat-oil-ceiling">€—/bbl</span>
-      </div>
-      <div class="stat">Customers: <span class="stat-val" id="stat-customers">0</span></div>
+      <div class="stat">Supply/Demand Ratio: <span class="stat-val" id="stat-supply-ratio">0.00</span></div>
+      <div class="stat">Customers: <span class="stat-val" id="stat-customers">Small 0/24 · Mid 0/12 · Big 0/6</span></div>
     </div>
   </div>
 

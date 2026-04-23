@@ -1,30 +1,31 @@
 import {
   CUSTOMER_TYPES,
-  ECONOMY,
-  EFUEL_SURGE_MULTIPLIER,
-  EFUEL_SURGE_PRESSURE,
+  DEMAND_PRICE_MAX,
+  DEMAND_PRICE_MIN,
+  DEMAND_PRICE_RESPONSE,
   MAX_PRESSURE,
-  PRICE_EMA_DECAY,
+  MIN_PRESSURE,
+  PRESSURE_PRICE_CURVE,
+  PRESSURE_PRICE_MAX,
+  PRESSURE_PRICE_MIN,
+  PRICE_RESPONSE_SPEED,
   REGIONS,
   TICKS_PER_DAY
 } from './config';
+import type { GameState } from './types';
 import { spawnPressurePulse } from './particles';
 import { state } from './state';
-
-// Anchor price used as the "dear" reference — no-supply and no-demand
-// regions drift toward it, and the global spot price is normalized against it.
-const BASE_PRICE = 6.0;
 
 /**
  * Per-tick economy step:
  *
  *  1. Roll up each customer's effective demand this tick (ramped toward
- *     their target demand, with an e-fuel surge boost at high pressure,
- *     and an older pressure-relief elasticity for e-fuel customers).
- *  2. Compute the global H₂ spot price from supply/demand ratio and a
- *     smoothing step. Update priceEMA on day boundaries.
- *  3. Per-region local prices drift toward the spot price scaled by local
- *     pressure, with a more-expensive default for disconnected regions.
+ *     target demand, with one simple price-response multiplier and the
+ *     existing e-fuel pressure scaling).
+ *  2. Compute H₂ price directly from pipe pressure using a smooth sigmoid:
+ *     low pressure is expensive, full pressure is cheap.
+ *  3. Apply the same pressure-price curve regionally so local prices are
+ *     easy to read: each region is priced by its own pressure.
  *  4. Distribute revenue from active customers, emit an occasional
  *     withdraw pulse for visual feedback.
  *  5. On day boundaries, push the current spot + pressure onto the
@@ -33,74 +34,70 @@ const BASE_PRICE = 6.0;
 export function updateEcon(): void {
   const s = state;
 
-  // Compute pressure-relief surge multiplier once per tick.
-  const pressureNorm = s.networkPressure / MAX_PRESSURE;
-  const surgeActive = pressureNorm >= EFUEL_SURGE_PRESSURE;
-
   // Reset region demand and add up live customers' effective demands.
   for (const rc of REGIONS) s.regions[rc.id].demand = 0;
   for (const c of s.customers) {
     if (!c.active) continue;
     const cfg = CUSTOMER_TYPES[c.type];
+    const rs = s.regions[c.regionId];
     // Ramped base demand: customers spin up gradually.
     const rampFactor = 0.1 + 0.9 * Math.max(0, Math.min(1, c.ramp));
     let effective = c.demand * rampFactor;
 
+    const localPrice = Math.max(0.5, rs.localPrice || s.spotPrice);
+    effective *= demandFactorFromPrice(localPrice, cfg.priceThreshold);
+
     // Pressure-relief customers (e-fuel) scale their intake with pressure.
     if (cfg?.pressureRelief) {
-      const rs = s.regions[c.regionId];
       const pressureFactor = Math.max(0.3, Math.min(2.0, rs.pressure / 40));
       effective *= pressureFactor;
-      // Surge boost: when network is near capacity, e-fuel visibly ramps.
-      if (surgeActive) effective *= EFUEL_SURGE_MULTIPLIER;
     }
     c.currentDemand = effective;
     s.regions[c.regionId].demand += effective;
   }
 
-  let totalSupply = 0;
-  let totalDemand = 0;
-  for (const rc of REGIONS) {
-    totalSupply += s.regions[rc.id].supply;
-    totalDemand += s.regions[rc.id].demand;
-  }
+  // Simple pressure-price model: fuller pipe = cheaper hydrogen.
+  const targetSpotPrice = priceFromPressure(s.networkPressure);
+  s.spotPrice += (targetSpotPrice - s.spotPrice) * PRICE_RESPONSE_SPEED;
+  s.spotPrice = Math.max(PRESSURE_PRICE_MIN, Math.min(PRESSURE_PRICE_MAX, s.spotPrice));
 
-  // Spot price from supply/demand ratio, smoothed.
-  if (totalSupply > 0) {
-    const ratio = totalDemand > 0 ? totalSupply / totalDemand : 2.5;
-    const targetPrice = BASE_PRICE / Math.pow(Math.max(0.1, ratio), 0.4);
-    s.spotPrice += (targetPrice - s.spotPrice) * 0.03;
-  }
-  s.spotPrice = Math.max(0.50, Math.min(12.0, s.spotPrice));
-
-  // Regional prices drift toward the spot price, modulated by pressure.
+  // Connected regions share one network pressure, so they also share one
+  // network-clearing price. Disconnected regions stay at the scarcity cap.
   for (const rc of REGIONS) {
     const rs = s.regions[rc.id];
-    if (rs.pipeConnections > 0) {
-      const pressureFactor = Math.max(0.5, rs.pressure / 40);
-      rs.localPrice += (s.spotPrice / pressureFactor - rs.localPrice) * 0.08;
-    } else if (rs.supply > 0) {
-      rs.localPrice += (s.spotPrice * 1.1 - rs.localPrice) * 0.08;
-    } else {
-      rs.localPrice += (BASE_PRICE * 1.5 - rs.localPrice) * 0.02;
-    }
-    rs.localPrice = Math.max(0.50, Math.min(15.0, rs.localPrice));
+    const targetLocalPrice = rs.pipeConnections > 0
+      ? s.spotPrice
+      : PRESSURE_PRICE_MAX;
+    rs.localPrice += (targetLocalPrice - rs.localPrice) * PRICE_RESPONSE_SPEED;
+    rs.localPrice = Math.max(PRESSURE_PRICE_MIN, Math.min(PRESSURE_PRICE_MAX, rs.localPrice));
   }
+
+  let networkSupply = 0;
+  let networkDemand = 0;
+  for (const rc of REGIONS) {
+    const rs = s.regions[rc.id];
+    if (rs.pipeConnections <= 0) continue;
+    networkSupply += rs.supply;
+    networkDemand += rs.demand;
+  }
+  const networkSupplyRatio = networkDemand > 0
+    ? Math.min(1, networkSupply / networkDemand)
+    : (networkSupply > 0 ? 1 : 0);
 
   // Revenue distribution.
   let tickRevenue = 0;
   for (const c of s.customers) {
     if (!c.active) continue;
     const rs = s.regions[c.regionId];
-    const supplyRatio = rs.demand > 0
-      ? Math.min(1, rs.supply / rs.demand)
-      : (rs.supply > 0 ? 1 : 0);
+    // Customers buy from the connected backbone, not only from generation
+    // built inside their own region. Pressure equalization is the transport
+    // model, so revenue should clear against connected-network availability.
+    const supplyRatio = rs.pipeConnections > 0
+      ? networkSupplyRatio
+      : (rs.demand > 0 ? Math.min(1, rs.supply / rs.demand) : (rs.supply > 0 ? 1 : 0));
     const currentDemand = c.currentDemand ?? c.demand;
     const servedPerTick = (currentDemand * supplyRatio) / TICKS_PER_DAY;
-    // v4: CUSTOMER_REVENUE_MULTIPLIER boosts effective per-kg payments so
-    // the flywheel still reliably rescues a player who reaches mid-game
-    // despite the tighter starting budget and daily opex burn.
-    const revenue = servedPerTick * rs.localPrice * ECONOMY.CUSTOMER_REVENUE_MULTIPLIER;
+    const revenue = servedPerTick * rs.localPrice * 1.8;
     tickRevenue += revenue;
     c.satisfaction = supplyRatio;
     s.totalH2Sold += servedPerTick;
@@ -113,7 +110,7 @@ export function updateEcon(): void {
   s.totalRevenue += tickRevenue;
   s.dailyRevenue = tickRevenue * TICKS_PER_DAY;
 
-  // Day-boundary bookkeeping: histories + priceEMA update.
+  // Day-boundary bookkeeping: histories.
   if (s.tick % TICKS_PER_DAY === 0) {
     s.priceHistory.push(s.spotPrice);
     if (s.priceHistory.length > 365) s.priceHistory.shift();
@@ -122,7 +119,126 @@ export function updateEcon(): void {
     // v4 budget chart: daily snapshot of the running budget.
     s.budgetHistory.push(s.money);
     if (s.budgetHistory.length > 365) s.budgetHistory.shift();
-    // EMA: today's priceEMA = decay * yesterday + (1 - decay) * today's spot.
-    s.priceEMA = PRICE_EMA_DECAY * s.priceEMA + (1 - PRICE_EMA_DECAY) * s.spotPrice;
   }
+}
+
+function priceFromPressure(pressure: number): number {
+  const clamped = Math.max(MIN_PRESSURE, Math.min(MAX_PRESSURE, pressure));
+  const minNorm = sigmoid(-PRESSURE_PRICE_CURVE / 2);
+  const maxNorm = sigmoid(PRESSURE_PRICE_CURVE / 2);
+  const x = ((clamped - MIN_PRESSURE) / Math.max(1, MAX_PRESSURE - MIN_PRESSURE) - 0.5) * PRESSURE_PRICE_CURVE;
+  const curved = (sigmoid(x) - minNorm) / Math.max(1e-6, maxNorm - minNorm);
+  return PRESSURE_PRICE_MAX - curved * (PRESSURE_PRICE_MAX - PRESSURE_PRICE_MIN);
+}
+
+function demandFactorFromPrice(price: number, threshold: number): number {
+  const safeThreshold = Math.max(0.5, threshold);
+  const x = (safeThreshold - price) / safeThreshold * DEMAND_PRICE_RESPONSE;
+  const curved = sigmoid(x);
+  return DEMAND_PRICE_MIN + curved * (DEMAND_PRICE_MAX - DEMAND_PRICE_MIN);
+}
+
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
+
+/**
+ * Instantaneous network-wide supply and demand at this tick (kg/day rate).
+ * `supply` is what the generator fleet is physically producing right now;
+ * `demand` is what live customers are asking for right now. Both swing
+ * with day/night and pressure-relief elasticity — don't present them as
+ * the strategic state of the network.
+ */
+export function instantaneousTotals(s: GameState): { supply: number; demand: number } {
+  let supply = 0;
+  let demand = 0;
+  for (const rc of REGIONS) {
+    supply += s.regions[rc.id].supply;
+    demand += s.regions[rc.id].demand;
+  }
+  return { supply, demand };
+}
+
+/**
+ * Push this tick's instantaneous supply/demand into the rolling ring
+ * buffers — one network-wide pair on `state`, plus one pair per region
+ * so the tooltip can display its own local 24h average. Each buffer's
+ * length is TICKS_PER_DAY, so once full it spans exactly one game-day.
+ */
+export function sampleSupplyDemand(): void {
+  const s = state;
+  const cap = TICKS_PER_DAY;
+  const { supply, demand } = instantaneousTotals(s);
+  pushRing(s.supplySamples, supply, cap, s.supplyDemandSampleIndex);
+  pushRing(s.demandSamples, demand, cap, s.supplyDemandSampleIndex);
+  s.supplyDemandSampleIndex = advanceIndex(s.supplyDemandSampleIndex, s.supplySamples.length, cap);
+
+  for (const rc of REGIONS) {
+    const rs = s.regions[rc.id];
+    if (!rs.supplySamples) rs.supplySamples = [];
+    if (!rs.demandSamples) rs.demandSamples = [];
+    const idx = rs.sampleIndex ?? 0;
+    pushRing(rs.supplySamples, rs.supply, cap, idx);
+    pushRing(rs.demandSamples, rs.demand, cap, idx);
+    rs.sampleIndex = advanceIndex(idx, rs.supplySamples.length, cap);
+  }
+}
+
+/** Push this tick's current day-rate revenue/opex into rolling HUD buffers. */
+export function sampleFinance(): void {
+  const s = state;
+  const cap = TICKS_PER_DAY;
+  pushRing(s.revenueSamples, s.dailyRevenue, cap, s.financeSampleIndex);
+  pushRing(s.opexSamples, s.dailyOpex, cap, s.financeSampleIndex);
+  s.financeSampleIndex = advanceIndex(s.financeSampleIndex, s.revenueSamples.length, cap);
+}
+
+function pushRing(buf: number[], v: number, cap: number, idx: number): void {
+  if (buf.length < cap) buf.push(v);
+  else buf[idx % cap] = v;
+}
+
+function advanceIndex(idx: number, len: number, cap: number): number {
+  if (len < cap) return len % cap;
+  return (idx + 1) % cap;
+}
+
+/**
+ * Average of whatever samples are currently present. Returns 0 for an
+ * empty buffer — early-game, before the first tick, the HUD still wants
+ * a number rather than NaN.
+ */
+function averageSamples(samples: number[] | undefined): number {
+  if (!samples || samples.length === 0) return 0;
+  let sum = 0;
+  for (const v of samples) sum += v;
+  return sum / samples.length;
+}
+
+/** Rolling average of recent total supply (kg/day). See sampleSupplyDemand. */
+export function getRollingAverageSupply(s: GameState): number {
+  return averageSamples(s.supplySamples);
+}
+
+/** Rolling average of recent total demand (kg/day). */
+export function getRollingAverageDemand(s: GameState): number {
+  return averageSamples(s.demandSamples);
+}
+
+/** Rolling average of a single region's supply (kg/day). */
+export function getRollingRegionSupply(s: GameState, regionId: string): number {
+  return averageSamples(s.regions[regionId]?.supplySamples);
+}
+
+/** Rolling average of a single region's demand (kg/day). */
+export function getRollingRegionDemand(s: GameState, regionId: string): number {
+  return averageSamples(s.regions[regionId]?.demandSamples);
+}
+
+export function getRollingAverageRevenue(s: GameState): number {
+  return averageSamples(s.revenueSamples);
+}
+
+export function getRollingAverageOpex(s: GameState): number {
+  return averageSamples(s.opexSamples);
 }

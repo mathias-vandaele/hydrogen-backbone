@@ -1,4 +1,4 @@
-import { BUILDINGS, ECONOMY, REGIONS } from './config';
+import { BUILDINGS, REGIONS } from './config';
 import { $ } from './dom';
 import { createInitialState, replaceState, state } from './state';
 import { initTutorial } from './tutorial';
@@ -125,27 +125,34 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!Array.isArray(merged.budgetHistory)) merged.budgetHistory = [];
   if (!Array.isArray(merged.pendingCustomers)) merged.pendingCustomers = [];
   if (!merged.milestones) merged.milestones = { ...fresh.milestones };
-  if (!merged.endgame) merged.endgame = { ...fresh.endgame };
   if (!merged.thresholdCrossings) merged.thresholdCrossings = { ...fresh.thresholdCrossings };
+  for (const key of Object.keys(fresh.thresholdCrossings)) {
+    const type = key as keyof typeof fresh.thresholdCrossings;
+    if (!(type in merged.thresholdCrossings)) merged.thresholdCrossings[type] = fresh.thresholdCrossings[type];
+  }
   if (typeof merged.lastSavedAt !== 'number') merged.lastSavedAt = 0;
-  if (typeof merged.totalCurtailed !== 'number') merged.totalCurtailed = 0;
   if (typeof merged.dailyRevenue !== 'number') merged.dailyRevenue = 0;
   if (typeof merged.dailyOpex !== 'number') merged.dailyOpex = 0;
-  if (typeof merged.priceEMA !== 'number') merged.priceEMA = merged.spotPrice ?? 6.0;
-  if (typeof merged.lastCustomerEmergenceDay !== 'number') merged.lastCustomerEmergenceDay = -999;
-  if (typeof merged.surplusStreakDays !== 'number') merged.surplusStreakDays = 0;
+  if (typeof merged.networkHydrogenStored !== 'number') merged.networkHydrogenStored = 0;
+  if (!Array.isArray(merged.revenueSamples)) merged.revenueSamples = [];
+  if (!Array.isArray(merged.opexSamples)) merged.opexSamples = [];
+  if (typeof merged.financeSampleIndex !== 'number') merged.financeSampleIndex = 0;
   if (typeof merged.daysBelowBankruptcyThreshold !== 'number') merged.daysBelowBankruptcyThreshold = 0;
-  if (typeof merged.firstPipelineBuiltDay !== 'number' && merged.firstPipelineBuiltDay !== null) {
-    merged.firstPipelineBuiltDay = Array.isArray(merged.pipes) && merged.pipes.length > 0
-      ? merged.pipes.reduce((m, p) => Math.min(m, p.builtDay), Infinity)
-      : null;
-  }
   if (typeof merged.gameOver === 'undefined') merged.gameOver = null;
 
-  // Backfill per-region reliabilityDays (v3 addition).
+  // Rolling 24h sample ring buffers (added after v4). Start empty — the
+  // first game-day will refill them; don't try to reconstruct from history.
+  if (!Array.isArray(merged.supplySamples)) merged.supplySamples = [];
+  if (!Array.isArray(merged.demandSamples)) merged.demandSamples = [];
+  if (typeof merged.supplyDemandSampleIndex !== 'number') merged.supplyDemandSampleIndex = 0;
+
+  // Backfill per-region reliabilityDays (v3 addition) + sample buffers.
   for (const rc of REGIONS) {
     const rs = merged.regions[rc.id];
     if (rs && typeof rs.reliabilityDays !== 'number') rs.reliabilityDays = 0;
+    if (rs && !Array.isArray(rs.supplySamples)) rs.supplySamples = [];
+    if (rs && !Array.isArray(rs.demandSamples)) rs.demandSamples = [];
+    if (rs && typeof rs.sampleIndex !== 'number') rs.sampleIndex = 0;
   }
 
   // Backfill ramp field on existing live customers.
@@ -155,33 +162,28 @@ function migrateSave(raw: Partial<GameState>): GameState {
     }
   }
 
-  // Backfill wright table for v3 keys (if loading a v2 save, the old
-  // WrightState had `solar/wind/nuclear/electrolyzer/pipeline` keys; we
-  // transplant those curves into the new keys that best match).
-  const w = merged.wright as unknown as Record<string, { cum: number; mult: number }>;
-  if (w && (w.solar || w.wind || w.nuclear || w.electrolyzer)) {
-    merged.wright = {
-      solarPlant: w.solarPlant ?? w.solar ?? { cum: 0, mult: 1 },
-      windPlant: w.windPlant ?? w.wind ?? { cum: 0, mult: 1 },
-      nuclearPlant: w.nuclearPlant ?? w.nuclear ?? { cum: 0, mult: 1 },
-      pipeline: w.pipeline ?? { cum: 0, mult: 1 }
-    };
-  }
-
   // v4: backfill per-building `cost` for old saves so the opex pass doesn't
-  // treat NaN as a burn. Use BUILDINGS[type].baseCost × v4 CAPEX multiplier
-  // as a best-effort default; no better signal is available pre-migration.
+  // treat NaN as a burn. Use BUILDINGS[type].baseCost as a best-effort
+  // default; no better signal is available pre-migration.
   if (Array.isArray(merged.buildings)) {
     for (const b of merged.buildings) {
       if (typeof b.cost !== 'number' || !Number.isFinite(b.cost)) {
         const cfg = (BUILDINGS as unknown as Record<string, { baseCost?: number } | undefined>)[b.type];
-        b.cost = Math.round((cfg?.baseCost ?? 50_000_000) * ECONOMY.BUILDING_COST_MULTIPLIER);
+        b.cost = Math.round(cfg?.baseCost ?? 50_000_000);
       }
     }
   }
 
   // Building-type migration: old saves had separate generators + electrolyzers.
   merged.buildings = migrateBuildings(merged.buildings as unknown as LegacyBuilding[]);
+
+  // Seed the simplified single-network linepack model from any saved
+  // network pressure so existing backbones don't reload as empty.
+  if ((!raw.networkHydrogenStored || raw.networkHydrogenStored <= 0) && Array.isArray(merged.pipes) && merged.pipes.length > 0) {
+    const totalCapacity = merged.pipes.reduce((sum, pipe) => sum + (pipe.linepackCapacity || 0), 0);
+    const pressureRatio = Math.max(0, Math.min(1, (merged.networkPressure || 0) / 80));
+    merged.networkHydrogenStored = totalCapacity * pressureRatio;
+  }
 
   return merged;
 }
@@ -212,7 +214,7 @@ function migrateBuildings(raw: LegacyBuilding[] | undefined): Building[] {
     if (!mapped) continue; // Drops legacy 'electrolyzer' + anything unknown.
     const preserved = (b as { cost?: number }).cost;
     const cfg = BUILDINGS[mapped];
-    const fallbackCost = Math.round((cfg?.baseCost ?? 50_000_000) * ECONOMY.BUILDING_COST_MULTIPLIER);
+    const fallbackCost = Math.round(cfg?.baseCost ?? 50_000_000);
     out.push({
       id: b.id,
       type: mapped,
