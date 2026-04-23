@@ -1,8 +1,9 @@
+import { updateFinancialAudio } from './audio';
 import { updateParticles } from './particles';
 import { drawFrame } from './renderer';
 import { state } from './state';
 import { tick } from './sim';
-import { updateHUD } from './ui';
+import { computeRunwayDays, updateHUD } from './ui';
 
 // Fixed sim timestep: one sim tick every 100 ms of wall time at 1× speed
 // (10 Hz). Rendering is always rAF-driven so visuals stay smooth regardless
@@ -40,6 +41,10 @@ function frame(timestamp: number): void {
 
   // UI refresh throttled to ~15 fps; DOM updates are the expensive part.
   if (timestamp % 4 < 2) updateHUD();
+
+  // v4: financial-stress heartbeat. Always called (cheap no-op when runway
+  // is comfortable) so the player feels tension as soon as burn bites.
+  updateFinancialAudio(computeRunwayDays());
 
   requestAnimationFrame(frame);
 }

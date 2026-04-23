@@ -1,9 +1,18 @@
-import { REGIONS } from './config';
+import { BUILDINGS, ECONOMY, REGIONS } from './config';
 import { $ } from './dom';
 import { createInitialState, replaceState, state } from './state';
 import { initTutorial } from './tutorial';
 import { showToast, updateBuildCosts, updateSaveTimestamp } from './ui';
-import type { GameState } from './types';
+import type { Building, BuildingType, GameState, PlaceableBuildingType } from './types';
+
+// Pre-v3 type names preserved here so we can detect old saves. Any save
+// that still carries these types is migrated into the new Hydrogen Plant
+// model by combining co-regional pairs or resetting cleanly.
+type LegacyBuildingType = 'solar' | 'wind' | 'nuclear' | 'electrolyzer';
+
+interface LegacyBuilding extends Omit<Building, 'type'> {
+  type: BuildingType | LegacyBuildingType;
+}
 
 // localStorage key. Single-slot save; a future version could namespace
 // multiple slots but the current UI exposes one.
@@ -100,21 +109,124 @@ export function loadFromStorageIfPresent(): void {
 }
 
 /**
- * Forward-migrate a possibly-old save: spread the raw payload over a
- * fresh state, then coerce fields we rely on to sane defaults. Must stay
- * forgiving — we never throw on load, since that would mean the player
- * can never get their game back.
+ * Forward-migrate a possibly-old save. Spreads the raw payload over a
+ * fresh state, coerces nullable fields, and — critically — maps
+ * pre-v3 building types (solar/wind/nuclear + electrolyzer pairs) into
+ * the new Hydrogen Plant model. Must stay forgiving: we never throw on
+ * load, since that would mean the player can never get their game back.
  */
 function migrateSave(raw: Partial<GameState>): GameState {
   const fresh = createInitialState();
   const merged: GameState = { ...fresh, ...raw } as GameState;
+
+  // Array + object fallbacks
   if (!Array.isArray(merged.priceHistory)) merged.priceHistory = [];
   if (!Array.isArray(merged.pressureHistory)) merged.pressureHistory = [];
+  if (!Array.isArray(merged.budgetHistory)) merged.budgetHistory = [];
+  if (!Array.isArray(merged.pendingCustomers)) merged.pendingCustomers = [];
   if (!merged.milestones) merged.milestones = { ...fresh.milestones };
+  if (!merged.endgame) merged.endgame = { ...fresh.endgame };
+  if (!merged.thresholdCrossings) merged.thresholdCrossings = { ...fresh.thresholdCrossings };
   if (typeof merged.lastSavedAt !== 'number') merged.lastSavedAt = 0;
   if (typeof merged.totalCurtailed !== 'number') merged.totalCurtailed = 0;
   if (typeof merged.dailyRevenue !== 'number') merged.dailyRevenue = 0;
+  if (typeof merged.dailyOpex !== 'number') merged.dailyOpex = 0;
+  if (typeof merged.priceEMA !== 'number') merged.priceEMA = merged.spotPrice ?? 6.0;
+  if (typeof merged.lastCustomerEmergenceDay !== 'number') merged.lastCustomerEmergenceDay = -999;
+  if (typeof merged.surplusStreakDays !== 'number') merged.surplusStreakDays = 0;
+  if (typeof merged.daysBelowBankruptcyThreshold !== 'number') merged.daysBelowBankruptcyThreshold = 0;
+  if (typeof merged.firstPipelineBuiltDay !== 'number' && merged.firstPipelineBuiltDay !== null) {
+    merged.firstPipelineBuiltDay = Array.isArray(merged.pipes) && merged.pipes.length > 0
+      ? merged.pipes.reduce((m, p) => Math.min(m, p.builtDay), Infinity)
+      : null;
+  }
+  if (typeof merged.gameOver === 'undefined') merged.gameOver = null;
+
+  // Backfill per-region reliabilityDays (v3 addition).
+  for (const rc of REGIONS) {
+    const rs = merged.regions[rc.id];
+    if (rs && typeof rs.reliabilityDays !== 'number') rs.reliabilityDays = 0;
+  }
+
+  // Backfill ramp field on existing live customers.
+  if (Array.isArray(merged.customers)) {
+    for (const c of merged.customers) {
+      if (typeof c.ramp !== 'number') c.ramp = 1;
+    }
+  }
+
+  // Backfill wright table for v3 keys (if loading a v2 save, the old
+  // WrightState had `solar/wind/nuclear/electrolyzer/pipeline` keys; we
+  // transplant those curves into the new keys that best match).
+  const w = merged.wright as unknown as Record<string, { cum: number; mult: number }>;
+  if (w && (w.solar || w.wind || w.nuclear || w.electrolyzer)) {
+    merged.wright = {
+      solarPlant: w.solarPlant ?? w.solar ?? { cum: 0, mult: 1 },
+      windPlant: w.windPlant ?? w.wind ?? { cum: 0, mult: 1 },
+      nuclearPlant: w.nuclearPlant ?? w.nuclear ?? { cum: 0, mult: 1 },
+      pipeline: w.pipeline ?? { cum: 0, mult: 1 }
+    };
+  }
+
+  // v4: backfill per-building `cost` for old saves so the opex pass doesn't
+  // treat NaN as a burn. Use BUILDINGS[type].baseCost × v4 CAPEX multiplier
+  // as a best-effort default; no better signal is available pre-migration.
+  if (Array.isArray(merged.buildings)) {
+    for (const b of merged.buildings) {
+      if (typeof b.cost !== 'number' || !Number.isFinite(b.cost)) {
+        const cfg = (BUILDINGS as unknown as Record<string, { baseCost?: number } | undefined>)[b.type];
+        b.cost = Math.round((cfg?.baseCost ?? 50_000_000) * ECONOMY.BUILDING_COST_MULTIPLIER);
+      }
+    }
+  }
+
+  // Building-type migration: old saves had separate generators + electrolyzers.
+  merged.buildings = migrateBuildings(merged.buildings as unknown as LegacyBuilding[]);
+
   return merged;
+}
+
+/**
+ * Collapse pre-v3 building entries into the new model. Rule: if a region
+ * had at least one generator (solar/wind/nuclear) AND at least one
+ * electrolyzer, each generator is upgraded in place to its bundled plant
+ * equivalent, and the electrolyzers are dropped (their function is now
+ * internal to the plant). Orphan generators without a co-regional
+ * electrolyzer are also upgraded (they now produce hydrogen directly —
+ * the most permissive interpretation, so no player work is lost). Orphan
+ * electrolyzers are dropped.
+ */
+function migrateBuildings(raw: LegacyBuilding[] | undefined): Building[] {
+  if (!raw || raw.length === 0) return [];
+  const kindMap: Record<string, PlaceableBuildingType> = {
+    solar: 'solarPlant',
+    wind: 'windPlant',
+    nuclear: 'nuclearPlant',
+    solarPlant: 'solarPlant',
+    windPlant: 'windPlant',
+    nuclearPlant: 'nuclearPlant'
+  };
+  const out: Building[] = [];
+  for (const b of raw) {
+    const mapped = kindMap[b.type as string];
+    if (!mapped) continue; // Drops legacy 'electrolyzer' + anything unknown.
+    const preserved = (b as { cost?: number }).cost;
+    const cfg = BUILDINGS[mapped];
+    const fallbackCost = Math.round((cfg?.baseCost ?? 50_000_000) * ECONOMY.BUILDING_COST_MULTIPLIER);
+    out.push({
+      id: b.id,
+      type: mapped,
+      regionId: b.regionId,
+      x: b.x,
+      y: b.y,
+      capacity: b.capacity,
+      cost: typeof preserved === 'number' && Number.isFinite(preserved) ? preserved : fallbackCost,
+      builtDay: b.builtDay,
+      production: 0,
+      internalElectricity: 0
+    });
+  }
+  return out;
 }
 
 /**

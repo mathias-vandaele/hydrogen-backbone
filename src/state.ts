@@ -1,5 +1,5 @@
 import { REGIONS, START_MONEY } from './config';
-import type { GameState, RegionState } from './types';
+import type { CustomerType, GameState, RegionState } from './types';
 
 /**
  * Build a fresh, ready-to-play GameState. Called on boot when no save
@@ -16,9 +16,13 @@ export function createInitialState(): GameState {
       pressure: 30,
       localPrice: 6.0,
       satisfaction: 0,
-      pipeConnections: 0
+      pipeConnections: 0,
+      reliabilityDays: 0
     };
   }
+  const thresholdCrossings: Record<CustomerType, number | null> = {
+    steel: null, ammonia: null, efuel: null, chemical: null, fuelcell: null, export: null
+  };
   return {
     tick: 0,
     gameDay: 1,
@@ -29,18 +33,27 @@ export function createInitialState(): GameState {
     money: START_MONEY,
     totalRevenue: 0,
     dailyRevenue: 0,
+    dailyOpex: 0,
     spotPrice: 6.0,
     priceHistory: [],
     pressureHistory: [],
+    budgetHistory: [],
+    daysBelowBankruptcyThreshold: 0,
+    firstPipelineBuiltDay: null,
+    gameOver: null,
+    priceEMA: 6.0,
+    lastCustomerEmergenceDay: -999,
+    pendingCustomers: [],
+    thresholdCrossings,
+    surplusStreakDays: 0,
     totalH2Produced: 0,
     totalH2Sold: 0,
     totalCurtailed: 0,
     networkPressure: 0,
     wright: {
-      solar: { cum: 0, mult: 1.0 },
-      wind: { cum: 0, mult: 1.0 },
-      nuclear: { cum: 0, mult: 1.0 },
-      electrolyzer: { cum: 0, mult: 1.0 },
+      solarPlant: { cum: 0, mult: 1.0 },
+      windPlant: { cum: 0, mult: 1.0 },
+      nuclearPlant: { cum: 0, mult: 1.0 },
       pipeline: { cum: 0, mult: 1.0 }
     },
     regions,
@@ -60,8 +73,19 @@ export function createInitialState(): GameState {
       priceBelow3: false,
       tenPipes: false
     },
+    endgame: {
+      phase: 'pre',
+      oilParityStreak: 0,
+      oilParityReachedOnDay: null,
+      escapeVelocityStreak: 0,
+      escapeVelocityReachedOnDay: null,
+      cinematicStage: 'none',
+      cinematicStartedAt: 0,
+      endScreenVisible: false,
+      manualTrigger: false
+    },
     lastSavedAt: 0,
-    version: 1
+    version: 4
   };
 }
 

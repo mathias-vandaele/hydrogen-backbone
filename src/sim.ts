@@ -1,7 +1,8 @@
-import { updateProduction } from './buildings';
-import { TICKS_PER_DAY } from './config';
+import { applyOpex, updateProduction } from './buildings';
+import { ECONOMY, TICKS_PER_DAY } from './config';
 import { checkEmergence, updateCustomers } from './customers';
 import { updateEcon } from './econ';
+import { triggerGameOver, updateEndgame } from './endgame';
 import { checkInsights } from './insights';
 import { solvePressure } from './pressure';
 import { autoSave } from './save';
@@ -35,6 +36,8 @@ export function togglePause(): void {
  */
 export function tick(): void {
   const s = state;
+  // Hard stop once the game-over screen is up — no further sim progress.
+  if (s.gameOver?.triggered) return;
   s.tick++;
 
   const dayFrac = 1 / TICKS_PER_DAY;
@@ -50,11 +53,31 @@ export function tick(): void {
   updateProduction();
   solvePressure();
   updateEcon();
+  applyOpex();
   checkEmergence();
   updateCustomers();
 
-  // Milestone-driven manifesto insights (replaces the old random pop-ups).
-  if (s.tick % TICKS_PER_DAY === 0) checkInsights();
+  // v4 bankruptcy watchdog: track consecutive days in the red; trigger
+  // game over after the grace period expires.
+  if (s.tick % TICKS_PER_DAY === 0) {
+    if (s.money < ECONOMY.BANKRUPTCY_THRESHOLD) {
+      s.daysBelowBankruptcyThreshold++;
+      if (s.daysBelowBankruptcyThreshold >= ECONOMY.BANKRUPTCY_GRACE_DAYS) {
+        triggerGameOver('bankruptcy');
+      }
+    } else {
+      s.daysBelowBankruptcyThreshold = 0;
+    }
+  }
+
+  // Day-boundary bookkeeping: milestone insights + narrative arc + autosave.
+  if (s.tick % TICKS_PER_DAY === 0) {
+    checkInsights();
+    updateEndgame();
+  }
+  // updateEndgame also ticks each frame's cinematic timeout when the
+  // day boundary hasn't hit — cheap enough to always call.
+  if (state.endgame.cinematicStage !== 'none') updateEndgame();
 
   autoSave();
 }

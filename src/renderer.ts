@@ -1,5 +1,5 @@
 import { canBuild } from './buildings';
-import { drawAreaChart } from './chart';
+import { drawBudgetChart, drawPriceChart } from './chart';
 import {
   BUILDINGS,
   CUSTOMER_TYPES,
@@ -57,6 +57,79 @@ export function drawFrame(timestamp: number): void {
   drawCustomers(ctx);
   drawPlacementGhost(ctx);
   drawDashboard(ctx, w, h);
+  drawCinematicOverlay(ctx, w, h);
+}
+
+// ─── Endgame cinematics (Priority 5) ─────────────────────────────────────
+
+/**
+ * Paint the active endgame cinematic over the top of the normal scene.
+ * Two stages:
+ *  - Oil parity: sustained network-wide bloom + green tint for ~10s.
+ *  - Escape velocity: slow camera-style vignette pullback + amplified
+ *    junction pulses; after 10s control hands off to the DOM end screen
+ *    (ui.ts checks `state.endgame.endScreenVisible`).
+ * Pure visuals — the sim continues uninterrupted underneath.
+ */
+function drawCinematicOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const stage = state.endgame.cinematicStage;
+  if (stage === 'none') return;
+  const elapsed = performance.now() - state.endgame.cinematicStartedAt;
+  const dur = 10_000;
+  const t = Math.min(1, Math.max(0, elapsed / dur));
+  // Fade in → hold → fade out envelope.
+  const env = t < 0.2 ? t / 0.2 : t > 0.8 ? (1 - t) / 0.2 : 1;
+
+  ctx.save();
+  if (stage === 'oilParity') {
+    // Soft green wash + concentric ring from the map centre.
+    ctx.fillStyle = `rgba(0, 255, 136, ${0.08 * env})`;
+    ctx.fillRect(0, 0, w, h);
+    const cx = mapView.mapX + mapView.mapW / 2;
+    const cy = mapView.mapY + mapView.mapH / 2;
+    const ringR = 60 + t * 520;
+    ctx.strokeStyle = `rgba(120, 255, 180, ${0.6 * env})`;
+    ctx.lineWidth = 3;
+    ctx.shadowColor = 'rgba(120, 255, 180, 0.7)';
+    ctx.shadowBlur = 24;
+    ctx.beginPath();
+    ctx.arc(cx, cy, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+    ctx.font = 'bold 24px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(200, 255, 220, ${0.95 * env})`;
+    ctx.fillText('OIL PARITY', cx, cy - 12);
+    ctx.font = '11px Courier New';
+    ctx.fillStyle = `rgba(200, 255, 220, ${0.75 * env})`;
+    ctx.fillText('e-fuels undercut petroleum', cx, cy + 8);
+  } else if (stage === 'escapeVelocity') {
+    // Dim the rest of the scene so the network pops.
+    ctx.fillStyle = `rgba(3, 6, 12, ${0.55 * env})`;
+    ctx.fillRect(0, 0, w, h);
+    // Cadence flash across customer icons
+    for (const c of state.customers) {
+      if (!c.active) continue;
+      const phase = ((t * 6) - (c.id % 13) * 0.08) % 1;
+      if (phase < 0 || phase > 0.2) continue;
+      const flash = 1 - phase / 0.2;
+      ctx.fillStyle = `rgba(6, 214, 160, ${0.55 * flash})`;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, 14 + 10 * flash, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Centered quote
+    const cx = w / 2;
+    const cy = h / 2;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = `rgba(200, 255, 220, ${0.95 * env})`;
+    ctx.font = 'bold 28px Courier New';
+    ctx.fillText('THE FLYWHEEL IGNITES', cx, cy - 20);
+    ctx.font = '12px Courier New';
+    ctx.fillStyle = `rgba(180, 230, 220, ${0.8 * env})`;
+    ctx.fillText('"You build the backbone to make hydrogen cheap."', cx, cy + 10);
+  }
+  ctx.restore();
 }
 
 // ─── Region flashes (triggered when new customers emerge) ─────────────────
@@ -112,20 +185,19 @@ function drawDashboard(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   const gaugeCY = h - bottomBar - margin - gaugeRadius;
   drawGauge(ctx, gaugeCX, gaugeCY, gaugeRadius, state.networkPressure, 0, MAX_PRESSURE);
 
-  const chartW = 220;
-  const chartH = 78;
-  const chartX = gaugeCX - gaugeRadius - 10 - chartW;
+  // Price trajectory chart — thresholds + projection (unchanged).
+  const chartW = 340;
+  const chartH = 110;
+  const chartX = gaugeCX - gaugeRadius - 12 - chartW;
   const chartY = h - bottomBar - margin - chartH;
+  drawPriceChart(ctx, chartX, chartY, chartW, chartH, 90, 120);
 
-  const priceFill = 'rgba(6, 214, 160, 0.18)';
-  const priceStroke = 'rgba(6, 214, 160, 0.95)';
-  const pressFill = 'rgba(245, 158, 11, 0.12)';
-  const pressStroke = 'rgba(245, 158, 11, 0.9)';
-
-  drawAreaChart(ctx, chartX, chartY, chartW, chartH, [
-    { values: state.priceHistory, strokeColor: priceStroke, fillColor: priceFill, label: 'H₂', unit: '€', minFloor: 0 },
-    { values: state.pressureHistory, strokeColor: pressStroke, fillColor: pressFill, label: 'P', unit: 'bar', minFloor: 0, maxCeil: MAX_PRESSURE }
-  ]);
+  // v4 Budget history chart — stacked above the price chart. Seeing the
+  // budget line approach the red bankruptcy floor is the visceral
+  // feedback loop scarcity needs.
+  const budgetH = 70;
+  const budgetY = chartY - budgetH - 8;
+  drawBudgetChart(ctx, chartX, budgetY, chartW, budgetH, 180);
 }
 
 // ─── Placement ghost (floating icon while in build mode) ─────────────────
@@ -242,6 +314,14 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
       ctx.fill(rp.path);
     }
 
+    // Slot fill brighten (Priority 4): each customer in this region adds a
+    // warm glow; a fully-saturated region visibly lights up at night.
+    const fill = slotFillRatio(rp.id);
+    if (fill > 0) {
+      ctx.fillStyle = `rgba(251, 191, 36, ${0.04 + 0.18 * fill})`;
+      ctx.fill(rp.path);
+    }
+
     // Day/night: darken based on the region centroid's illumination
     const centroid = rp.region.centroid;
     // Find the centroid longitude from the raw feature. We don't have it
@@ -283,6 +363,19 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
       ctx.fillRect(bx, by, barW * pressureRatio, barH);
     }
   }
+}
+
+/**
+ * Returns the 0..1 occupancy of a region's customer slots (sum of all
+ * slot kinds). Saturated regions visibly brighten in drawRegions.
+ */
+function slotFillRatio(regionId: string): number {
+  const rc = getRegionConfig(regionId);
+  if (!rc) return 0;
+  const cap = rc.industrialSlots + rc.distributedSlots + rc.portSlots + rc.efuelSlots;
+  if (cap <= 0) return 0;
+  const live = state.customers.filter(c => c.active && c.regionId === regionId).length;
+  return Math.min(1, live / cap);
 }
 
 // Cache region centroid longitudes — they don't change at runtime.
@@ -590,39 +683,78 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
 // ─── Buildings ───────────────────────────────────────────────────────────
 
 /**
- * Render each placed building as its emoji icon, with type-specific color
- * and a production-gated soft glow — inactive assets are dimmer, so the
- * map immediately shows the player which plants are earning.
+ * Render each placed Hydrogen Plant as a composite: the generator icon on
+ * the left, a small internal "electrolyzer" bracket on the right, and a
+ * pulsing electricity particle traveling from generator → electrolyzer
+ * → hydrogen-output. This visually teaches that conversion is internal
+ * and only hydrogen leaves the plant.
  */
 function drawBuildings(ctx: CanvasRenderingContext2D): void {
   for (const b of state.buildings) {
     const cfg = BUILDINGS[b.type];
-    ctx.save();
-    let color = '#ffffff';
-    let glow = 'rgba(255,255,255,0.1)';
-    if (b.type === 'solar') {
-      color = '#fbbf24';
-      glow = b.production > 0 ? 'rgba(251,191,36,0.4)' : 'rgba(251,191,36,0.1)';
-    } else if (b.type === 'wind') {
-      color = '#e2e8f0';
-      glow = b.production > 0 ? 'rgba(226,232,240,0.3)' : 'rgba(226,232,240,0.1)';
-    } else if (b.type === 'nuclear') {
-      color = '#a78bfa';
-      glow = 'rgba(167,139,250,0.3)';
-    } else if (b.type === 'electrolyzer') {
-      color = '#06d6a0';
-      glow = b.production > 0 ? 'rgba(6,214,160,0.4)' : 'rgba(6,214,160,0.1)';
+
+    // Per-plant palette
+    let genColor = '#ffffff';
+    let genGlow = 'rgba(255,255,255,0.1)';
+    if (b.type === 'solarPlant') {
+      genColor = '#fbbf24';
+      genGlow = b.production > 0 ? 'rgba(251,191,36,0.4)' : 'rgba(251,191,36,0.1)';
+    } else if (b.type === 'windPlant') {
+      genColor = '#e2e8f0';
+      genGlow = b.production > 0 ? 'rgba(226,232,240,0.3)' : 'rgba(226,232,240,0.1)';
+    } else if (b.type === 'nuclearPlant') {
+      genColor = '#a78bfa';
+      genGlow = 'rgba(167,139,250,0.3)';
     }
 
+    ctx.save();
+    ctx.translate(b.x, b.y);
+
+    // Generator icon (left half of the plant).
     if (b.production > 0) {
-      ctx.shadowColor = glow;
+      ctx.shadowColor = genGlow;
       ctx.shadowBlur = 8;
     }
-    ctx.fillStyle = color;
+    ctx.fillStyle = genColor;
     ctx.font = '14px sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(cfg.icon, b.x, b.y);
+    ctx.fillText(cfg.icon, -8, 0);
+    ctx.shadowBlur = 0;
+
+    // Electrolyzer bracket (right half). Ring + internal dot hinting at
+    // an electrolyzer stack. Bright when producing, dim when idle.
+    const elGlow = b.production > 0 ? 'rgba(6,214,160,0.55)' : 'rgba(6,214,160,0.18)';
+    ctx.strokeStyle = elGlow;
+    ctx.fillStyle = b.production > 0 ? 'rgba(6,214,160,0.8)' : 'rgba(6,214,160,0.28)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(8, 0, 5, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(8, 0, 1.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Internal electron pulse: a small dot traveling left→right from
+    // generator to electrolyzer repeatedly. Only draw when producing so
+    // idle plants read clearly as idle.
+    if (b.production > 0) {
+      const phase = (render.animPhase * 1.6 + (b.id * 0.17)) % 1; // 0..1
+      const px = -6 + phase * 12;
+      ctx.fillStyle = 'rgba(255,220,120,0.9)';
+      ctx.shadowColor = 'rgba(255,220,120,0.8)';
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.arc(px, 0, 1.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+
+    // H₂ output tick on the right edge, glows when producing.
+    ctx.fillStyle = b.production > 0 ? 'rgba(6,214,160,0.9)' : 'rgba(6,214,160,0.3)';
+    ctx.font = '7px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText('H₂', 14, 0);
     ctx.restore();
   }
 }

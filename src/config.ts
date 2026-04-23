@@ -9,57 +9,132 @@ import type {
 
 export const TICKS_PER_SEC = 10;
 export const TICKS_PER_DAY = 10;
-export const START_MONEY = 500_000_000;
 export const MAX_PRESSURE = 80;
 export const MIN_PRESSURE = 5;
 export const MAP_PADDING = 60;
 
+// ─── v4 Economy (Priority 2: scarcity-first tuning) ──────────────────────
+// Central knobs for the scarcity model. Tune these after playing 15 min.
+// STARTING_BUDGET: headroom for Act 1 builds. Too high and there's no
+//   urgency; too low and the player can't reach their first revenue event.
+// BUILDING_COST_MULTIPLIER: applied when resolving `getCost` so capital
+//   weighs more than v3 without rewriting every BUILDINGS entry.
+// DAILY_OPEX_FRACTION: running cost per live asset per day, scales with
+//   that asset's CAPEX. Idle assets still pay — this is the mechanism
+//   that punishes overbuilding ahead of demand.
+// BANKRUPTCY_* : soft lose condition. Below threshold for GRACE_DAYS
+//   triggers a Game Over screen.
+// CUSTOMER_REVENUE_MULTIPLIER: uplift on per-kg payments so the flywheel
+//   still reliably rescues a player who reaches the mid-game.
+export const ECONOMY = {
+  STARTING_BUDGET: 200_000_000,
+  BUILDING_COST_MULTIPLIER: 1.5,
+  // OPEX ratio: 0.03%/day ≈ 11%/year of CAPEX. Aligns with real renewable-
+  // plant OPEX (5-15%/yr). Earlier 0.1%/day = 37%/yr made even a fully-
+  // utilized plant unprofitable — customers couldn't cover it because
+  // the 1.4× revenue markup was far too thin against the burn rate.
+  DAILY_OPEX_FRACTION: 0.0003,
+  BANKRUPTCY_THRESHOLD: -50_000_000, // -€50M
+  BANKRUPTCY_GRACE_DAYS: 90,
+  // Customers pay wholesale × this markup. 1.8× leaves a realistic
+  // gross margin once OPEX is subtracted — a served plant should be
+  // clearly profitable, an unserved plant should still clearly burn.
+  CUSTOMER_REVENUE_MULTIPLIER: 1.8
+};
+
+// Legacy alias — `state.ts` still imports this name; point at the new knob.
+export const START_MONEY = ECONOMY.STARTING_BUDGET;
+
+// ─── v4 Narrative acts (Priority 1: fix early-firing climax) ─────────────
+// The entire story is gated behind act-entry days. ACT_2_MIN_DAY is the
+// earliest any climactic trigger can fire; before then the game is Act 1
+// (setup). ACT_3_MIN_DAY is the earliest Escape Velocity can fire, AND
+// Oil Parity must have fired already.
+// OIL_PARITY_PRICE_THRESHOLD is €1.30/kg — realistic e-fuel parity with
+// fossil crude. Price + production-floor + customer-floor together
+// guarantee the climax reflects a real market, not a puddle.
+export const NARRATIVE = {
+  ACT_2_MIN_DAY: 180,
+  ACT_3_MIN_DAY: 360,
+  OIL_PARITY_SUSTAIN_DAYS: 30,
+  OIL_PARITY_PRICE_THRESHOLD: 1.3,
+  OIL_PARITY_MIN_PRODUCTION_KG: 5000,
+  OIL_PARITY_MIN_CUSTOMERS: 3
+};
+
+// ─── Economic arc tuning (carried from v3) ───────────────────────────────
+export const GLOBAL_EMERGENCE_COOLDOWN_DAYS = 5;
+export const PRICE_EMA_DECAY = 0.97;
+export const WRIGHT_SAVINGS_CAP = 0.45;
+export const CHURN_DAILY_PROBABILITY = 0.0002;
+export const EFUEL_SURGE_PRESSURE = 0.85;
+export const EFUEL_SURGE_MULTIPLIER = 1.5;
+
+// Escape Velocity gates (unchanged from v3 apart from Act-3 floor).
+export const ESCAPE_VELOCITY_REQUIRED_DAYS = 20;
+export const ESCAPE_VELOCITY_SUPPLY_RATIO = 1.2;
+export const ESCAPE_VELOCITY_WRIGHT_SAVINGS = 0.3;
+export const ESCAPE_VELOCITY_CONNECTED_REGIONS = 8;
+export const ESCAPE_VELOCITY_CUSTOMERS = 12;
+
+// Aliases so chart.ts / ui.ts can read the canonical oil-parity threshold
+// without importing the whole NARRATIVE block.
+export const OIL_PARITY_THRESHOLD = NARRATIVE.OIL_PARITY_PRICE_THRESHOLD;
+export const OIL_PARITY_REQUIRED_DAYS = NARRATIVE.OIL_PARITY_SUSTAIN_DAYS;
+
+// Priority 4: grace window so the first customer can reliably emerge
+// before scarcity bankrupts a reasonable opening build.
+export const FIRST_CUSTOMER_GRACE_MIN_DAYS = 45;
+export const FIRST_CUSTOMER_GRACE_MAX_DAYS = 75;
+
 // Wright's Law learning rates (cost reduction per doubling of cumulative capacity).
 export const LEARNING: Record<BuildingType, number> = {
-  solar: 0.20,
-  wind: 0.15,
-  nuclear: 0.05,
-  electrolyzer: 0.18,
+  solarPlant: 0.20,
+  windPlant: 0.15,
+  nuclearPlant: 0.05,
   pipeline: 0.10
 };
 
+// Bundled plant cost = old-generator-cost + old-electrolyzer-cost × 0.9
+// (10% bundling discount to reward integrated placement, per v3 brief).
+// baseOutput stays tied to the generator side; the plant pipes its
+// electricity through an integrated 70%-efficient electrolyzer stack.
 export const BUILDINGS: BuildingsConfigMap = {
-  solar: {
-    name: 'Solar Farm',
+  solarPlant: {
+    name: 'Solar Hydrogen Plant',
     icon: '☀️',
+    kind: 'solar',
     capacity: 100,
-    baseCost: 55_000_000,
+    baseCost: 90_000_000, // (55M + 45M) × 0.9
     baseOutput: 600,
     capacityFactor: 0.22,
-    quote: '"Solar electricity in southern Europe costs 20 €/MWh today… This is not a projection. It is a market price."'
+    electrolyzerEfficiency: 0.70,
+    kwhPerKg: 55,
+    quote: '"Solar electricity in southern Europe costs 20 €/MWh today. Co-locate electrolysis; only molecules leave."'
   },
-  wind: {
-    name: 'Wind Farm',
+  windPlant: {
+    name: 'Wind Hydrogen Plant',
     icon: '💨',
+    kind: 'wind',
     capacity: 100,
-    baseCost: 75_000_000,
+    baseCost: 108_000_000, // (75M + 45M) × 0.9
     baseOutput: 800,
     capacityFactor: 0.28,
-    quote: '"Every MWh of excess renewable generation can be converted to hydrogen… There is no such thing as excess."'
+    electrolyzerEfficiency: 0.70,
+    kwhPerKg: 55,
+    quote: '"Every MWh of excess wind converts to hydrogen on the spot. There is no such thing as excess."'
   },
-  nuclear: {
-    name: 'Nuclear Plant',
+  nuclearPlant: {
+    name: 'Nuclear Hydrogen Plant',
     icon: '⚛️',
-    capacity: 200,
-    baseCost: 180_000_000,
+    kind: 'nuclear',
+    capacity: 1000,
+    baseCost: 900_000_000, // (180M + 45M) × 0.9
     baseOutput: 4200,
     capacityFactor: 0.90,
-    quote: '"Nuclear excels at constant output… Electrolysis absorbs off-peak nuclear power, raising reactor load factors and revenue."'
-  },
-  electrolyzer: {
-    name: 'Electrolyzer',
-    icon: '🔬',
-    capacity: 50,
-    baseCost: 45_000_000,
-    efficiency: 0.70,
+    electrolyzerEfficiency: 0.70,
     kwhPerKg: 55,
-    maxH2PerDay: 22_000,
-    quote: '"An electrolyzer converts electricity to hydrogen at roughly 70% efficiency."'
+    quote: '"Baseload nuclear, electrolysed on-site, 24/7. Raises reactor load factors; only hydrogen enters the pipe."'
   },
   pipeline: {
     name: 'Pipeline',
@@ -72,45 +147,77 @@ export const BUILDINGS: BuildingsConfigMap = {
   }
 };
 
+// Each customer type now has a differentiated emergence gate (Priority 2),
+// an investment lag (Priority 1 — the delay between price crossing and
+// actual commitment), a ramp duration (Priority 1 — demand starts small
+// and grows), and a slot-kind (Priority 4 — finite regional capacity).
 export const CUSTOMER_TYPES: Record<CustomerType, CustomerTypeConfig> = {
   steel: {
     name: 'Steel DRI Plant', icon: '🏭', color: '#ef4444',
     priceThreshold: 5.5, demandMin: 8000, demandMax: 25_000,
     weight: 0.25, minPipeConnections: 1,
+    slotKind: 'industrial',
+    investmentLagDays: 45,
+    rampDurationDays: 20,
+    emergenceGate: { kind: 'priceThreshold', threshold: 5.5 },
     quote: '"A single DRI plant consumes roughly 70,000 tonnes of H₂ per year. Connect it to the pipe."'
   },
   ammonia: {
     name: 'Ammonia Factory', icon: '🧪', color: '#8b5cf6',
     priceThreshold: 5.0, demandMin: 5000, demandMax: 18_000,
     weight: 0.25, minPipeConnections: 1,
+    slotKind: 'industrial',
+    investmentLagDays: 30,
+    rampDurationDays: 15,
+    emergenceGate: { kind: 'priceThreshold', threshold: 5.0 },
     quote: '"The Haber-Bosch process consumes 1.8% of global energy, almost all from grey hydrogen."'
   },
   efuel: {
     name: 'E-Fuel Refinery', icon: '⛽', color: '#f59e0b',
     priceThreshold: 4.5, demandMin: 3000, demandMax: 35_000,
     weight: 0.3, minPipeConnections: 1, pressureRelief: true,
-    quote: '"E-fuel producers are the backbone\'s natural pressure relief valve… Plants ramp up automatically when pressure is high."'
+    slotKind: 'efuel',
+    investmentLagDays: 35,
+    rampDurationDays: 15,
+    emergenceGate: { kind: 'pressureRelief', minPressure: 0.7 },
+    quote: '"E-fuel producers are the backbone\'s natural pressure relief valve. Plants ramp up automatically when pressure is high."'
   },
   chemical: {
     name: 'Chemical Plant', icon: '⚗️', color: '#3b82f6',
     priceThreshold: 4.0, demandMin: 2000, demandMax: 12_000,
     weight: 0.2, minPipeConnections: 1,
+    slotKind: 'industrial',
+    investmentLagDays: 25,
+    rampDurationDays: 12,
+    emergenceGate: { kind: 'priceThreshold', threshold: 4.0 },
     quote: '"The entire petrochemical value chain has hydrogen-fed alternatives."'
   },
   fuelcell: {
     name: 'Fuel Cell Station', icon: '🔋', color: '#06d6a0',
     priceThreshold: 3.5, demandMin: 500, demandMax: 5000,
     weight: 0.3, minPipeConnections: 1,
-    quote: '"A municipality installs a fuel cell… It now has a dispatchable local power plant with no emissions."'
+    slotKind: 'distributed',
+    investmentLagDays: 15,
+    rampDurationDays: 10,
+    emergenceGate: { kind: 'supplyReliability', minUptimeDays: 30 },
+    quote: '"A municipality installs a fuel cell. It now has a dispatchable local power plant with no emissions."'
   },
   export: {
     name: 'Export Terminal', icon: '🚢', color: '#06b6d4',
     priceThreshold: 3.0, demandMin: 15_000, demandMax: 60_000,
     weight: 0.15, minPipeConnections: 2, requiresPort: true,
+    slotKind: 'port',
+    investmentLagDays: 60,
+    rampDurationDays: 20,
+    emergenceGate: { kind: 'domesticSurplus', minSurplusRatio: 1.25, minSurplusDays: 20 },
     quote: '"France\'s port infrastructure is positioned for e-fuel export to global shipping and aviation markets."'
   }
 };
 
+// Slot distribution roughly tracks industryDemand, population, port status,
+// and suitability for e-fuel refining. Total across all 13 regions ≈ 27
+// (industrial 11, distributed 9, port 4, efuel 6) so the endgame arrives
+// after the player has lit a recognisable portion of the map.
 export const REGIONS: RegionConfig[] = [
   {
     id: 'hauts-de-france', code: '32', name: 'Hauts-de-France', abbr: 'HdF',
@@ -118,14 +225,16 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.55, windBase: 0.85, nuclearBonus: 1.3, industryDemand: 1.4,
     hasPort: true, portName: 'Dunkirk/Calais',
     gasInfra: 0.8, maxSlots: 12,
-    color: '#1a2535'
+    color: '#1a2535',
+    industrialSlots: 2, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'grand-est', code: '44', name: 'Grand Est', abbr: 'GE',
     capital: 'Strasbourg',
     solarBase: 0.55, windBase: 0.70, nuclearBonus: 1.4, industryDemand: 1.2,
     hasPort: false, gasInfra: 0.7, maxSlots: 14,
-    color: '#1a2840'
+    color: '#1a2840',
+    industrialSlots: 2, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'normandie', code: '28', name: 'Normandy', abbr: 'NOR',
@@ -133,7 +242,8 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.50, windBase: 0.80, nuclearBonus: 1.2, industryDemand: 0.9,
     hasPort: true, portName: 'Le Havre/Rouen',
     gasInfra: 0.6, maxSlots: 10,
-    color: '#152535'
+    color: '#152535',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'bretagne', code: '53', name: 'Brittany', abbr: 'BRE',
@@ -141,21 +251,24 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.50, windBase: 0.90, nuclearBonus: 0.0, industryDemand: 0.6,
     hasPort: true, portName: 'Brest',
     gasInfra: 0.4, maxSlots: 8,
-    color: '#12253a'
+    color: '#12253a',
+    industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'ile-de-france', code: '11', name: 'Île-de-France', abbr: 'IdF',
     capital: 'Paris',
     solarBase: 0.55, windBase: 0.50, nuclearBonus: 0.3, industryDemand: 1.5,
     hasPort: false, gasInfra: 0.9, maxSlots: 8,
-    color: '#1e2845'
+    color: '#1e2845',
+    industrialSlots: 1, distributedSlots: 2, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'centre-val-de-loire', code: '24', name: 'Centre-Val de Loire', abbr: 'CVL',
     capital: 'Orléans',
     solarBase: 0.60, windBase: 0.55, nuclearBonus: 1.3, industryDemand: 0.7,
     hasPort: false, gasInfra: 0.5, maxSlots: 12,
-    color: '#162535'
+    color: '#162535',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'pays-de-la-loire', code: '52', name: 'Pays de la Loire', abbr: 'PdL',
@@ -163,14 +276,16 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.58, windBase: 0.75, nuclearBonus: 0.5, industryDemand: 0.7,
     hasPort: true, portName: 'Nantes-Saint-Nazaire',
     gasInfra: 0.5, maxSlots: 10,
-    color: '#142530'
+    color: '#142530',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 0
   },
   {
     id: 'bourgogne-franche-comte', code: '27', name: 'Bourgogne-Franche-Comté', abbr: 'BFC',
     capital: 'Dijon',
     solarBase: 0.58, windBase: 0.55, nuclearBonus: 0.8, industryDemand: 0.8,
     hasPort: false, gasInfra: 0.6, maxSlots: 12,
-    color: '#182840'
+    color: '#182840',
+    industrialSlots: 1, distributedSlots: 0, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'nouvelle-aquitaine', code: '75', name: 'Nouvelle-Aquitaine', abbr: 'NAQ',
@@ -178,21 +293,24 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.68, windBase: 0.55, nuclearBonus: 0.8, industryDemand: 0.8,
     hasPort: true, portName: 'Bordeaux/La Rochelle',
     gasInfra: 0.7, maxSlots: 16,
-    color: '#152030'
+    color: '#152030',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'auvergne-rhone-alpes', code: '84', name: 'Auvergne-Rhône-Alpes', abbr: 'ARA',
     capital: 'Lyon',
     solarBase: 0.65, windBase: 0.50, nuclearBonus: 1.5, industryDemand: 1.3,
     hasPort: false, gasInfra: 0.8, maxSlots: 14,
-    color: '#1a2840'
+    color: '#1a2840',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'occitanie', code: '76', name: 'Occitanie', abbr: 'OCC',
     capital: 'Toulouse',
     solarBase: 0.82, windBase: 0.65, nuclearBonus: 0.6, industryDemand: 0.9,
     hasPort: false, gasInfra: 0.6, maxSlots: 14,
-    color: '#1a2030'
+    color: '#1a2030',
+    industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'provence-alpes-cote-dazur', code: '93', name: "Provence-Alpes-Côte d'Azur", abbr: 'PACA',
@@ -200,7 +318,8 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.92, windBase: 0.60, nuclearBonus: 0.7, industryDemand: 1.0,
     hasPort: true, portName: 'Marseille-Fos',
     gasInfra: 0.7, maxSlots: 12,
-    color: '#1e2535'
+    color: '#1e2535',
+    industrialSlots: 0, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'corse', code: '94', name: 'Corsica', abbr: 'COR',
@@ -208,7 +327,8 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.88, windBase: 0.70, nuclearBonus: 0.0, industryDemand: 0.3,
     hasPort: true, portName: 'Ajaccio/Bastia',
     gasInfra: 0.1, maxSlots: 4,
-    color: '#182535'
+    color: '#182535',
+    industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   }
 ];
 

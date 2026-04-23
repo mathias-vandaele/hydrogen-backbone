@@ -15,28 +15,18 @@ const STEPS: TutorialStep[] = [
     btn: 'Begin'
   },
   {
-    title: 'Step 1: The Map',
-    text: 'France is divided into 13 regions, each with unique strengths. Southern regions get more sun. Northern/coastal regions get more wind. Some have nuclear plants, industrial demand, or ports. Hover over regions to explore.',
+    title: 'Step 1: Build a Hydrogen Plant',
+    text: 'Click "Solar Hydrogen Plant" in the build menu, then place it in a sunny southern region like Occitanie or PACA. Solar electricity is converted to hydrogen *inside the plant* at 70% efficiency — only molecules leave the facility.\n\n☀ Sunlight → ⚡ internal electricity → 🔬 electrolysis → 💧 H₂',
     btn: 'Next'
   },
   {
-    title: 'Step 2: Build Solar',
-    text: 'Start by building a Solar Farm in a sunny southern region like Occitanie or Provence-Alpes-Côte d\'Azur. Click "Solar Farm" in the build menu, then click a region.\n\n"Solar electricity in southern Europe costs 20 €/MWh today."',
+    title: 'Step 2: Draw the Pipe',
+    text: 'Click "Pipeline", then click two regions to connect. The pipe carries hydrogen — not electricity — between regions. Line-packed pipe is the battery.\n\n"The pipe does not care who injects hydrogen or who withdraws it."',
     btn: 'Next'
   },
   {
-    title: 'Step 3: Add an Electrolyzer',
-    text: 'Solar panels make electricity, but electricity is the wrong carrier for bulk energy. Build an Electrolyzer in the same region to convert electricity into hydrogen molecules at 70% efficiency.',
-    btn: 'Next'
-  },
-  {
-    title: 'Step 4: Build the Pipe',
-    text: 'Draw pipelines between regions to create the hydrogen backbone. Click "Pipeline" in the build menu, then click two regions to connect. The pipe stores energy through line-packing — it IS the battery.\n\n"The pipe does not care who injects hydrogen or who withdraws it."',
-    btn: 'Next'
-  },
-  {
-    title: 'Step 5: Watch the Flywheel',
-    text: 'As hydrogen flows and prices drop, customers will emerge: steel plants, ammonia factories, e-fuel refineries, and more. Their demand creates revenue. Revenue funds more solar and pipes. Costs fall via Wright\'s Law. The flywheel spins.\n\nUse speed controls (1×/10×/100×) to accelerate time. Right-click to cancel building. Press Space to pause.',
+    title: 'Step 3: Watch the Price Descend',
+    text: 'As the backbone grows, price descends through a staircase of thresholds — each a type of customer that emerges on its own logic: industry needs cheap H₂, e-fuel soaks up high pressure, fuel-cell stations trust reliable supply, export terminals arrive when surplus is sustained.\n\nYour target: oil parity (€4.5/kg) → escape velocity.\n\nSpeed: 1×/2×/3× or 1/10/100. Space pauses.',
     btn: 'Start Playing!'
   }
 ];

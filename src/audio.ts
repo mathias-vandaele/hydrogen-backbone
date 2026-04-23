@@ -6,6 +6,10 @@ interface AudioState {
   initialized: boolean;
   ambientGain: GainNode | null;
   ambientStarted: boolean;
+  /** Timestamp of last bankruptcy heartbeat beat (ms). */
+  lastHeartbeat: number;
+  /** Current beat interval — shortens as runway shrinks. */
+  heartbeatIntervalMs: number;
 }
 
 const audio: AudioState = {
@@ -13,7 +17,9 @@ const audio: AudioState = {
   enabled: true,
   initialized: false,
   ambientGain: null,
-  ambientStarted: false
+  ambientStarted: false,
+  lastHeartbeat: 0,
+  heartbeatIntervalMs: 0
 };
 
 /**
@@ -175,4 +181,75 @@ export function playBubble(): void {
   play('sine', 400, 700, 0.08, 0.08);
   setTimeout(() => play('sine', 600, 900, 0.07, 0.06), 90);
   setTimeout(() => play('sine', 800, 1200, 0.06, 0.05), 180);
+}
+
+/**
+ * Cha-ching — bright two-note celebration played when a new customer
+ * emerges. Complements (does not replace) the existing playCustomer
+ * arpeggio by emphasising the *revenue* side of the event, so the
+ * player feels financial relief distinct from the "new thing on map".
+ */
+export function playChaChing(): void {
+  play('triangle', 1200, 1600, 0.08, 0.10);
+  setTimeout(() => play('sine', 1800, 2400, 0.10, 0.08), 70);
+}
+
+/** Muted, slightly-detuned "thud" — one beat of the bankruptcy heartbeat. */
+function playHeartbeat(intensity: number): void {
+  if (!audio.enabled || !audio.ctx) return;
+  try {
+    const ctx = audio.ctx;
+    const o = ctx.createOscillator();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(90, ctx.currentTime);
+    o.frequency.exponentialRampToValueAtTime(48, ctx.currentTime + 0.22);
+    const g = ctx.createGain();
+    const peak = Math.min(0.14, 0.05 + intensity * 0.1);
+    g.gain.setValueAtTime(0, ctx.currentTime);
+    g.gain.linearRampToValueAtTime(peak, ctx.currentTime + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.28);
+    o.connect(g).connect(ctx.destination);
+    o.start();
+    o.stop(ctx.currentTime + 0.3);
+  } catch {
+    // Silently no-op on transient failure.
+  }
+}
+
+/**
+ * Per-frame audio side-effects driven by the financial state. Called
+ * from the main loop with the current runway (in game-days). Produces
+ * a quiet, escalating heartbeat as runway shortens:
+ *   - Runway > 60 days   → silent.
+ *   - 60..30 days        → slow pulse (~2s interval).
+ *   - 30..10 days        → medium pulse (~1s).
+ *   - < 10 days          → fast pulse (~0.5s), louder.
+ * The function is stateless at the caller's level; it tracks its own
+ * last-beat timestamp and adjusts the interval on every call.
+ */
+export function updateFinancialAudio(runwayDays: number): void {
+  if (!audio.enabled || !audio.ctx) { audio.lastHeartbeat = 0; return; }
+  if (!Number.isFinite(runwayDays) || runwayDays >= 60) {
+    audio.heartbeatIntervalMs = 0;
+    return;
+  }
+  // Map runway → interval. Below 10 days, fast; otherwise linearly.
+  let interval: number;
+  let intensity: number;
+  if (runwayDays < 10) {
+    interval = 500;
+    intensity = 1;
+  } else if (runwayDays < 30) {
+    interval = 1000;
+    intensity = 0.7;
+  } else {
+    interval = 2000;
+    intensity = 0.4;
+  }
+  audio.heartbeatIntervalMs = interval;
+  const now = performance.now();
+  if (now - audio.lastHeartbeat >= interval) {
+    playHeartbeat(intensity);
+    audio.lastHeartbeat = now;
+  }
 }

@@ -1,12 +1,30 @@
 import { playClick } from './audio';
 import { getCost } from './buildings';
-import { BUILDINGS, CUSTOMER_TYPES, REGIONS, getRegionConfig } from './config';
+import { pathToOilParity } from './chart';
+import { BUILDINGS, CUSTOMER_TYPES, OIL_PARITY_THRESHOLD, REGIONS, getRegionConfig } from './config';
 import { $, $$, $maybe } from './dom';
+import {
+  canManuallyTriggerEscapeVelocity,
+  endScreenStats,
+  escapeVelocityProgress,
+  fireEscapeVelocityCinematic
+} from './endgame';
 import { input } from './input';
 import { mapView } from './map';
-import { state } from './state';
+import { createInitialState, replaceState, state } from './state';
 import { getSeason, getWeatherAt } from './weather';
 import type { BuildingType, Insight } from './types';
+
+/**
+ * v4 Runway: how many days of operation remain at the current burn rate.
+ * Positive burn = losing money; negative burn = net profitable → ∞.
+ * Return NaN for "effectively infinite" so callers can render it as ∞.
+ */
+export function computeRunwayDays(): number {
+  const burn = state.dailyOpex - state.dailyRevenue;
+  if (burn <= 0) return Infinity;
+  return state.money / burn;
+}
 
 let toastTimer: number | undefined;
 
@@ -49,6 +67,43 @@ export function initUI(): void {
 
   const hudMoney = $('#hud-money');
   hudMoney.addEventListener('click', () => {/* placeholder for future money breakdown */});
+
+  // Endgame DOM wiring
+  const witness = $maybe<HTMLButtonElement>('#witness-btn');
+  if (witness) witness.addEventListener('click', () => {
+    if (canManuallyTriggerEscapeVelocity()) fireEscapeVelocityCinematic(true);
+  });
+  const cont = $maybe<HTMLButtonElement>('#end-continue');
+  if (cont) cont.addEventListener('click', () => {
+    state.endgame.endScreenVisible = false;
+    state.endgame.phase = 'ended';
+    $('#end-screen').classList.remove('show');
+  });
+  const newGame = $maybe<HTMLButtonElement>('#end-newgame');
+  if (newGame) newGame.addEventListener('click', () => {
+    replaceState(createInitialState());
+    $('#end-screen').classList.remove('show');
+    updateBuildCosts();
+    showToast('New game started!');
+  });
+  const gameoverNew = $maybe<HTMLButtonElement>('#gameover-newgame');
+  if (gameoverNew) gameoverNew.addEventListener('click', () => {
+    replaceState(createInitialState());
+    $('#gameover-screen').classList.remove('show');
+    updateBuildCosts();
+    showToast('New run started.');
+  });
+  const share = $maybe<HTMLButtonElement>('#end-share');
+  if (share) share.addEventListener('click', () => {
+    const s = state;
+    const text = `I reached Escape Velocity in The Backbone on day ${s.gameDay} — ${s.customers.filter(c => c.active).length} customers, H₂ €${s.spotPrice.toFixed(2)}/kg.`;
+    try {
+      navigator.clipboard?.writeText(text);
+      showToast('Summary copied to clipboard.');
+    } catch {
+      showToast('Could not copy summary.');
+    }
+  });
 }
 
 // ─── Build-btn manifesto quote tooltip ───────────────────────────────────
@@ -62,7 +117,18 @@ function showBuildQuote(btn: HTMLButtonElement, type: BuildingType): void {
   const tip = $maybe('#build-tooltip');
   if (!tip) return;
   const cfg = BUILDINGS[type];
-  tip.textContent = `"${cfg.quote.replace(/^"|"$/g, '')}"`;
+  // For Hydrogen Plants, prepend the electrons-to-molecules flow diagram
+  // so the player can *see* that only hydrogen leaves the facility.
+  let html = '';
+  if (type === 'solarPlant' || type === 'windPlant' || type === 'nuclearPlant') {
+    const srcIcon = type === 'solarPlant' ? '☀️' : type === 'windPlant' ? '💨' : '⚛️';
+    const srcLabel = type === 'solarPlant' ? 'Sunlight'
+                   : type === 'windPlant' ? 'Wind'
+                   : 'Fission';
+    html += `<div class="flow-diagram">${srcIcon} ${srcLabel} <span class="flow-arrow">→</span> ⚡ internal <span class="flow-arrow">→</span> 🔬 70% <span class="flow-arrow">→</span> 💧 H₂ <em>to pipe</em></div>`;
+  }
+  html += `<div class="quote-body">"${cfg.quote.replace(/^"|"$/g, '')}"</div>`;
+  tip.innerHTML = html;
   const r = btn.getBoundingClientRect();
   tip.style.display = 'block';
   tip.style.left = `${Math.round(r.right + 8)}px`;
@@ -84,8 +150,11 @@ function hideBuildQuote(): void {
 export function updateHUD(): void {
   const s = state;
 
-  $('#hud-money').textContent = `€${fmtMoney(s.money)}`;
-  $('#hud-money').className = `hud-value${s.money < 10_000_000 ? ' warn' : ''}`;
+  // Budget now shown as signed — can go negative in v4. `warn` below €30M,
+  // `danger` when negative.
+  const moneyEl = $('#hud-money');
+  moneyEl.textContent = `${s.money < 0 ? '-€' : '€'}${fmtMoney(Math.abs(s.money))}`;
+  moneyEl.className = `hud-value${s.money < 0 ? ' danger' : s.money < 30_000_000 ? ' warn' : ''}`;
   $('#hud-price').textContent = `€${s.spotPrice.toFixed(2)}/kg`;
   $('#hud-produced').textContent = fmtTonnes(s.totalH2Produced);
   $('#hud-customers').textContent = String(s.customers.filter(c => c.active).length);
@@ -104,13 +173,34 @@ export function updateHUD(): void {
     totalSupply += s.regions[rc.id].supply;
     totalDemand += s.regions[rc.id].demand;
   }
-  $('#stat-supply').textContent = fmtNum(totalSupply);
-  $('#stat-demand').textContent = fmtNum(totalDemand);
-  $('#stat-curtail').textContent = fmtNum(s.totalCurtailed);
-  const avgWright = (s.wright.solar.mult + s.wright.electrolyzer.mult) / 2;
+  $('#stat-supply').textContent = `${fmtNum(totalSupply)}`;
+  $('#stat-demand').textContent = `${fmtNum(totalDemand)}`;
+  // Curtailment now shown in kg/day (pressure-cap rejection). Flash red
+  // when positive so overbuild ahead of demand reads immediately.
+  const curtEl = $('#stat-curtail');
+  curtEl.textContent = fmtNum(s.totalCurtailed);
+  curtEl.classList.toggle('bad', s.totalCurtailed > 0);
+  curtEl.classList.toggle('cyan', s.totalCurtailed === 0);
+
+  // Economy group: revenue / opex / net.
+  const net = s.dailyRevenue - s.dailyOpex;
+  const revEl = $('#stat-revenue');
+  const opxEl = $('#stat-opex');
+  const netEl = $('#stat-net');
+  revEl.textContent = `+€${fmtMoney(s.dailyRevenue)}/day`;
+  opxEl.textContent = `-€${fmtMoney(s.dailyOpex)}/day`;
+  netEl.textContent = `${net >= 0 ? '+' : '-'}€${fmtMoney(Math.abs(net))}/day`;
+  netEl.classList.toggle('good', net > 0);
+  netEl.classList.toggle('bad', net < 0);
+
+  // Network group.
+  const avgWright = (s.wright.solarPlant.mult + s.wright.windPlant.mult) / 2;
   $('#stat-wright').textContent = `${Math.round((1 - avgWright) * 100)}%`;
-  $('#stat-revenue').textContent = `€${fmtMoney(s.dailyRevenue)}/day`;
   $('#stat-oil-ceiling').textContent = `€${oilCeiling(s.spotPrice).toFixed(0)}/bbl`;
+  $('#stat-customers').textContent = String(s.customers.filter(c => c.active).length);
+
+  // Runway indicator — the single most important v4 HUD element.
+  updateRunwayIndicator();
 
   // Periodic refreshes (~1 s)
   if (s.tick % 10 === 0) {
@@ -124,6 +214,119 @@ export function updateHUD(): void {
   const idx = s.paused ? 0 : (speedMap[s.speed] ?? 1);
   const btns = $$<HTMLButtonElement>('#speed-controls button');
   btns[idx]?.classList.add('active');
+
+  updateParityBar();
+  updateEndScreen();
+  updateGameOverScreen();
+}
+
+/**
+ * Keep the Runway HUD cell in sync. Translates a numeric runway to a
+ * color-coded string (safe/warn/danger/critical/profitable). ∞ is used
+ * whenever burn is net-negative, which is the flywheel's steady state.
+ */
+function updateRunwayIndicator(): void {
+  const el = $maybe('#hud-runway');
+  if (!el) return;
+  const runway = computeRunwayDays();
+  // Strip old state classes before applying the new one.
+  el.classList.remove('runway-safe', 'runway-warn', 'runway-danger', 'runway-critical', 'runway-profit');
+  if (!Number.isFinite(runway)) {
+    el.textContent = '∞';
+    el.classList.add('runway-profit');
+    return;
+  }
+  const days = Math.max(0, Math.floor(runway));
+  el.textContent = `${days}d`;
+  if (days < 30) el.classList.add('runway-critical');
+  else if (days < 60) el.classList.add('runway-danger');
+  else if (days < 120) el.classList.add('runway-warn');
+  else el.classList.add('runway-safe');
+}
+
+/**
+ * Populate + show the somber Game Over modal when `state.gameOver` is
+ * set. Idempotent — only re-renders the stats block once per flip.
+ */
+function updateGameOverScreen(): void {
+  const root = $maybe('#gameover-screen');
+  if (!root) return;
+  const over = state.gameOver;
+  if (!over?.triggered) {
+    root.classList.remove('show');
+    return;
+  }
+  if (!root.classList.contains('show')) {
+    const reasonEl = $('#gameover-reason');
+    if (over.reason === 'bankruptcy') {
+      reasonEl.textContent =
+        'The budget sat below €-50M for 90 consecutive days. The operation ran out of runway before the flywheel caught — your capital was exhausted before a large enough market formed.';
+    } else {
+      reasonEl.textContent = over.reason;
+    }
+    const rows = endScreenStats();
+    const el = $('#gameover-stats');
+    el.innerHTML = rows
+      .map(r => `<div class="label">${r.label}</div><div class="val">${r.value}</div>`)
+      .join('');
+    root.classList.add('show');
+  }
+}
+
+/**
+ * Keep the progress bar in sync: pre-parity shows "Path to Oil Parity"
+ * descending from €6 → €4.5. Post-parity switches into "Path to Escape
+ * Velocity" and starts watching escape-velocity conditions. The
+ * "Witness the flywheel" button appears once the Stage 2 gate is met.
+ */
+function updateParityBar(): void {
+  const bar = $maybe('#parity-bar');
+  if (!bar) return;
+  const s = state;
+  const preParity = s.endgame.oilParityReachedOnDay === null;
+  if (preParity) {
+    bar.classList.remove('escape');
+    const t = pathToOilParity();
+    ($('#parity-label') as HTMLElement).textContent = 'Path to Oil Parity';
+    ($('#parity-fill') as HTMLElement).style.width = `${Math.round(t * 100)}%`;
+    ($('#parity-readout') as HTMLElement).textContent =
+      `€${s.spotPrice.toFixed(2)} → €${OIL_PARITY_THRESHOLD.toFixed(2)} (${Math.round(t * 100)}%)`;
+    const witness = $maybe<HTMLButtonElement>('#witness-btn');
+    if (witness) witness.style.display = 'none';
+  } else {
+    bar.classList.add('escape');
+    const t = escapeVelocityProgress();
+    ($('#parity-label') as HTMLElement).textContent = 'Path to Escape Velocity';
+    ($('#parity-fill') as HTMLElement).style.width = `${Math.round(t * 100)}%`;
+    ($('#parity-readout') as HTMLElement).textContent =
+      `Flywheel ${Math.round(t * 100)}% · day ${s.gameDay}`;
+    const witness = $maybe<HTMLButtonElement>('#witness-btn');
+    if (witness) {
+      witness.style.display = canManuallyTriggerEscapeVelocity() ? 'inline-block' : 'none';
+    }
+  }
+}
+
+/**
+ * Show the end screen once the escape-velocity cinematic finishes and
+ * `endScreenVisible` flips to true. Populates the stats block from
+ * endgame.endScreenStats().
+ */
+function updateEndScreen(): void {
+  const root = $maybe('#end-screen');
+  if (!root) return;
+  if (!state.endgame.endScreenVisible) {
+    root.classList.remove('show');
+    return;
+  }
+  if (!root.classList.contains('show')) {
+    const rows = endScreenStats();
+    const el = $('#end-stats');
+    el.innerHTML = rows
+      .map(r => `<div class="label">${r.label}</div><div class="val">${r.value}</div>`)
+      .join('');
+    root.classList.add('show');
+  }
 }
 
 // ─── DOM region tooltip (follows cursor on hover) ────────────────────────

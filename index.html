@@ -10,7 +10,8 @@
   <canvas id="gameCanvas"></canvas>
 
   <div id="hud-top">
-    <div class="hud-item"><span class="hud-label">Budget</span><span class="hud-value" id="hud-money">€500M</span></div>
+    <div class="hud-item"><span class="hud-label">Budget</span><span class="hud-value" id="hud-money">€150M</span></div>
+    <div class="hud-item hud-runway" title="Days of operation remaining at current burn rate"><span class="hud-label">Runway</span><span class="hud-value" id="hud-runway">∞</span></div>
     <div class="hud-item"><span class="hud-label">H₂ Price</span><span class="hud-value" id="hud-price">€6.00/kg</span></div>
     <div class="hud-item"><span class="hud-label">H₂ Produced</span><span class="hud-value" id="hud-produced">0 t</span></div>
     <div class="hud-item"><span class="hud-label">Customers</span><span class="hud-value" id="hud-customers">0</span></div>
@@ -28,21 +29,17 @@
 
   <div id="build-menu">
     <h3>⚡ Build</h3>
-    <button class="build-btn" data-type="solar">
-      ☀️ Solar Farm (100MW)<br><span class="cost"></span>
-      <div class="desc">Best in sunny southern regions</div>
+    <button class="build-btn" data-type="solarPlant">
+      ☀️→🔬→H₂ Solar Hydrogen Plant<br><span class="cost"></span>
+      <div class="desc">100 MW solar + integrated electrolyzer. Only molecules leave.</div>
     </button>
-    <button class="build-btn" data-type="wind">
-      💨 Wind Farm (100MW)<br><span class="cost"></span>
-      <div class="desc">Best in northern/coastal regions</div>
+    <button class="build-btn" data-type="windPlant">
+      💨→🔬→H₂ Wind Hydrogen Plant<br><span class="cost"></span>
+      <div class="desc">100 MW wind + integrated electrolyzer. Only molecules leave.</div>
     </button>
-    <button class="build-btn" data-type="nuclear">
-      ⚛️ Nuclear Plant<br><span class="cost"></span>
-      <div class="desc">Steady baseload, nuclear-friendly regions</div>
-    </button>
-    <button class="build-btn" data-type="electrolyzer">
-      🔬 Electrolyzer (50MW)<br><span class="cost"></span>
-      <div class="desc">Converts electricity → H₂ at 70% efficiency</div>
+    <button class="build-btn" data-type="nuclearPlant">
+      ⚛️→🔬→H₂ Nuclear Hydrogen Plant<br><span class="cost"></span>
+      <div class="desc">Baseload reactor + integrated electrolyzer. 24/7.</div>
     </button>
     <button class="build-btn" data-type="pipeline">
       🔗 Pipeline<br><span class="cost">Click two regions to connect</span>
@@ -58,15 +55,60 @@
   <div id="region-tooltip"></div>
   <div id="build-tooltip"></div>
 
-  <div id="status-bar">
-    <div class="stat">Supply: <span class="stat-val" id="stat-supply">0</span> kg/day</div>
-    <div class="stat">Demand: <span class="stat-val" id="stat-demand">0</span> kg/day</div>
-    <div class="stat">Curtailed: <span class="stat-val" id="stat-curtail">0</span> MWh</div>
-    <div class="stat">Wright Savings: <span class="stat-val" id="stat-wright">0%</span></div>
-    <div class="stat" title="Oil price at which e-fuel production becomes profitable at current H₂ spot price">
-      Oil Ceiling: <span class="stat-val" id="stat-oil-ceiling">€—/bbl</span>
+  <!-- Path-to-Parity / Path-to-Escape-Velocity progress bar. -->
+  <div id="parity-bar">
+    <div class="parity-label" id="parity-label">Path to Oil Parity</div>
+    <div class="parity-track">
+      <div class="parity-fill" id="parity-fill"></div>
     </div>
-    <div class="stat" style="margin-left:auto">Revenue: <span class="stat-val" id="stat-revenue">€0/day</span></div>
+    <div class="parity-readout" id="parity-readout">€6.00 → €4.50</div>
+    <button id="witness-btn" style="display:none">Witness the flywheel</button>
+  </div>
+
+  <!-- End screen (shown after the escape-velocity cinematic completes). -->
+  <div id="end-screen">
+    <div class="end-box">
+      <h2>Escape Velocity Reached.</h2>
+      <p class="end-sub">The flywheel is self-sustaining.</p>
+      <div id="end-stats"></div>
+      <div class="end-actions">
+        <button id="end-continue">Continue building (sandbox)</button>
+        <button id="end-newgame">New game</button>
+        <button id="end-share">Share</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="status-bar">
+    <div class="status-group status-production">
+      <div class="stat">Supply: <span class="stat-val" id="stat-supply">0</span> kg/day</div>
+      <div class="stat">Demand: <span class="stat-val" id="stat-demand">0</span> kg/day</div>
+      <div class="stat">Curtailed: <span class="stat-val" id="stat-curtail">0</span> kg/day</div>
+    </div>
+    <div class="status-group status-economy">
+      <div class="stat">Revenue: <span class="stat-val good" id="stat-revenue">+€0/day</span></div>
+      <div class="stat">Opex: <span class="stat-val bad" id="stat-opex">-€0/day</span></div>
+      <div class="stat">Net: <span class="stat-val" id="stat-net">€0/day</span></div>
+    </div>
+    <div class="status-group status-network">
+      <div class="stat">Wright: <span class="stat-val" id="stat-wright">0%</span></div>
+      <div class="stat" title="Oil price at which e-fuel production becomes profitable at current H₂ spot price">
+        Oil Ceiling: <span class="stat-val" id="stat-oil-ceiling">€—/bbl</span>
+      </div>
+      <div class="stat">Customers: <span class="stat-val" id="stat-customers">0</span></div>
+    </div>
+  </div>
+
+  <!-- Game Over modal (Priority 2: bankruptcy lose-state). -->
+  <div id="gameover-screen">
+    <div class="gameover-box">
+      <h2>Out of Runway</h2>
+      <p class="gameover-sub" id="gameover-reason">The backbone ran out of money before the flywheel caught.</p>
+      <div id="gameover-stats"></div>
+      <div class="end-actions">
+        <button id="gameover-newgame">Start a new run</button>
+      </div>
+    </div>
   </div>
 
   <div id="tutorial" class="show">
