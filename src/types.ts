@@ -74,9 +74,6 @@ export interface CustomerTypeConfig {
   pressureRelief?: boolean;
   requiresPort?: boolean;
   slotKind: SlotKind;
-  investmentLagMinDays: number;
-  investmentLagMaxDays: number;
-  rampDurationDays: number;
   quote: string;
 }
 
@@ -187,9 +184,9 @@ export interface Customer {
   regionId: string;
   type: CustomerType;
   name: string;
-  /** Final target demand once ramp completes (kg/day). */
+  /** Reference demand shown in UI / summaries (kg/day). */
   demand: number;
-  /** Live demand after ramping and any elasticity modifiers (kg/day). */
+  /** Live price-shaped demand after ramping and elasticity modifiers (kg/day). */
   currentDemand?: number;
   maxPrice: number;
   satisfaction: number;
@@ -199,26 +196,6 @@ export interface Customer {
   active: boolean;
   unsatisfiedDays: number;
   scale: number;
-  /** 0..1 ramp factor applied to `demand` while the facility spins up. */
-  ramp: number;
-}
-
-/**
- * A customer whose emergence gate has fired but which has not yet been
- * materialized. Models a committed-but-not-yet-operating project so the
- * price signal can propagate further before this customer's demand lands.
- * If the signal reverses (price climbs back above 110% of threshold)
- * while pending, the project is cancelled.
- */
-export interface PendingCustomer {
-  id: string;
-  type: CustomerType;
-  regionId: string;
-  committedOnDay: number;
-  commitsOnDay: number;
-  cancelled: boolean;
-  /** Pre-rolled target demand in kg/day so UI can show a "coming online" badge. */
-  targetDemand: number;
 }
 
 export interface MilestoneFlags {
@@ -259,7 +236,6 @@ export interface GameState {
   daysBelowBankruptcyThreshold: number;
   /** Populated when bankruptcy grace expires; the game-over screen reads it. */
   gameOver: GameOverState | null;
-  pendingCustomers: PendingCustomer[];
   thresholdCrossings: Record<CustomerType, number | null>;
   totalH2Produced: number;
   totalH2Sold: number;

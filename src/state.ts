@@ -45,7 +45,6 @@ export function createInitialState(): GameState {
     budgetHistory: [],
     daysBelowBankruptcyThreshold: 0,
     gameOver: null,
-    pendingCustomers: [],
     thresholdCrossings,
     totalH2Produced: 0,
     totalH2Sold: 0,

@@ -317,14 +317,13 @@ function dailyOpexFractionFor(type: PlaceableBuildingType): number {
 }
 
 /**
- * Sum of daily opex across every live building + pipeline. v5: buildings
- * use per-type annual OPEX fractions sourced from IRENA/IEA real-world
- * references. Pipelines use the same annual-fraction model.
+ * Sum of daily opex across every live plant. Pipeline maintenance is
+ * treated as publicly funded backbone upkeep, so it does not hit the
+ * player's operating budget.
  */
 export function computeDailyOpex(): number {
   let opex = 0;
   for (const b of state.buildings) opex += b.cost * dailyOpexFractionFor(b.type);
-  for (const p of state.pipes) opex += p.cost * (OPEX_ANNUAL_FRACTION.PIPELINE / 365);
   return opex;
 }
 

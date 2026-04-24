@@ -123,7 +123,6 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!Array.isArray(merged.priceHistory)) merged.priceHistory = [];
   if (!Array.isArray(merged.pressureHistory)) merged.pressureHistory = [];
   if (!Array.isArray(merged.budgetHistory)) merged.budgetHistory = [];
-  if (!Array.isArray(merged.pendingCustomers)) merged.pendingCustomers = [];
   if (!merged.milestones) merged.milestones = { ...fresh.milestones };
   if (!merged.thresholdCrossings) merged.thresholdCrossings = { ...fresh.thresholdCrossings };
   for (const key of Object.keys(fresh.thresholdCrossings)) {
@@ -153,13 +152,6 @@ function migrateSave(raw: Partial<GameState>): GameState {
     if (rs && !Array.isArray(rs.supplySamples)) rs.supplySamples = [];
     if (rs && !Array.isArray(rs.demandSamples)) rs.demandSamples = [];
     if (rs && typeof rs.sampleIndex !== 'number') rs.sampleIndex = 0;
-  }
-
-  // Backfill ramp field on existing live customers.
-  if (Array.isArray(merged.customers)) {
-    for (const c of merged.customers) {
-      if (typeof c.ramp !== 'number') c.ramp = 1;
-    }
   }
 
   // v4: backfill per-building `cost` for old saves so the opex pass doesn't

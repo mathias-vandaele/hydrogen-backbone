@@ -63,8 +63,7 @@ export const NAMEPLATE_MW = {
 export const OPEX_ANNUAL_FRACTION = {
   SOLAR_PLANT: 0.020,   // 2.0%/yr of CAPEX
   WIND_PLANT: 0.030,    // 3.0%/yr of CAPEX
-  NUCLEAR_PLANT: 0.025, // 2.5%/yr of CAPEX
-  PIPELINE: 0.020        // 2%/yr of CAPEX
+  NUCLEAR_PLANT: 0.025  // 2.5%/yr of CAPEX
 };
 
 // Alkaline electrolyzer, LHV basis. PEM sits at 60-68%; SOEC approaches
@@ -80,9 +79,9 @@ export const KWH_PER_KG_H2 = 50;
 // cycle ≈ 27.8% outage ≈ 72.2% availability — matching the published
 // RTE French reactor-fleet CF of ~0.72. Plants are staggered by id so
 // outages are distributed across the fleet rather than simultaneous.
-export const NUCLEAR_OUTAGE_DAYS = 75;
+export const NUCLEAR_OUTAGE_DAYS = 25;
 export const NUCLEAR_CYCLE_DAYS = 270;
-export const NUCLEAR_FLEET_PHASE_OFFSET = 40; // days between successive plants
+export const NUCLEAR_FLEET_PHASE_OFFSET = 0; // days between successive plants
 
 // ─── v4 Economy + v5 real-world CAPEX ────────────────────────────────────
 // STARTING_BUDGET raised to €400M so the player can afford exactly one
@@ -91,7 +90,7 @@ export const NUCLEAR_FLEET_PHASE_OFFSET = 40; // days between successive plants
 // brief. Scarcity pressure remains: the second plant is not affordable
 // until early customer revenue flows.
 export const ECONOMY = {
-  STARTING_BUDGET: 400_000_000,
+  STARTING_BUDGET: 10_000_000_000,
   BANKRUPTCY_THRESHOLD: -50_000_000,     // -€50M
   BANKRUPTCY_GRACE_DAYS: 90
 };
@@ -103,10 +102,7 @@ export const START_MONEY = ECONOMY.STARTING_BUDGET;
 export const PRESSURE_PRICE_MIN = 2.0;
 export const PRESSURE_PRICE_MAX = 8.0;
 export const PRESSURE_PRICE_CURVE = 8.0;
-export const PRICE_RESPONSE_SPEED = 0.2;
 export const DEMAND_PRICE_RESPONSE = 3.5;
-export const DEMAND_PRICE_MIN = 0.35;
-export const DEMAND_PRICE_MAX = 1.75;
 export const CUSTOMER_SUPPLY_BUFFER_MULTIPLIER = 1.2;
 export const EMERGENCE_LOGISTIC_STEEPNESS = 12;
 export const EMERGENCE_LOGISTIC_CENTER = 0.7;
@@ -163,12 +159,6 @@ export const BUILDINGS: BuildingsConfigMap = {
   }
 };
 
-const TIER_LAG_DAYS: Record<CustomerTier, { min: number; max: number; ramp: number }> = {
-  small: { min: 15, max: 25, ramp: 10 },
-  mid: { min: 45, max: 60, ramp: 15 },
-  big: { min: 90, max: 120, ramp: 20 }
-};
-
 function makeCustomerTier(
   archetype: CustomerArchetype,
   tier: CustomerTier,
@@ -182,7 +172,6 @@ function makeCustomerTier(
   quote: string,
   options: { minPipeConnections?: number; requiresPort?: boolean; pressureRelief?: boolean } = {}
 ): CustomerTypeConfig {
-  const lag = TIER_LAG_DAYS[tier];
   return {
     archetype,
     tier,
@@ -197,9 +186,6 @@ function makeCustomerTier(
     pressureRelief: options.pressureRelief,
     requiresPort: options.requiresPort,
     slotKind,
-    investmentLagMinDays: lag.min,
-    investmentLagMaxDays: lag.max,
-    rampDurationDays: lag.ramp,
     quote
   };
 }

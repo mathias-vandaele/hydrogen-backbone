@@ -1,14 +1,11 @@
 import {
   CUSTOMER_TYPES,
-  DEMAND_PRICE_MAX,
-  DEMAND_PRICE_MIN,
   DEMAND_PRICE_RESPONSE,
   MAX_PRESSURE,
   MIN_PRESSURE,
   PRESSURE_PRICE_CURVE,
   PRESSURE_PRICE_MAX,
   PRESSURE_PRICE_MIN,
-  PRICE_RESPONSE_SPEED,
   REGIONS,
   TICKS_PER_DAY
 } from './config';
@@ -19,9 +16,8 @@ import { state } from './state';
 /**
  * Per-tick economy step:
  *
- *  1. Roll up each customer's effective demand this tick (ramped toward
- *     target demand, with one simple price-response multiplier and the
- *     existing e-fuel pressure scaling).
+ *  1. Roll up each customer's effective demand this tick using one simple
+ *     price-response multiplier plus the existing e-fuel pressure scaling.
  *  2. Compute H₂ price directly from pipe pressure using a smooth sigmoid:
  *     low pressure is expensive, full pressure is cheap.
  *  3. Apply the same pressure-price curve regionally so local prices are
@@ -40,12 +36,8 @@ export function updateEcon(): void {
     if (!c.active) continue;
     const cfg = CUSTOMER_TYPES[c.type];
     const rs = s.regions[c.regionId];
-    // Ramped base demand: customers spin up gradually.
-    const rampFactor = 0.1 + 0.9 * Math.max(0, Math.min(1, c.ramp));
-    let effective = c.demand * rampFactor;
-
     const localPrice = Math.max(0.5, rs.localPrice || s.spotPrice);
-    effective *= demandFactorFromPrice(localPrice, cfg.priceThreshold);
+    let effective = demandFromPrice(localPrice, cfg.demandMin, cfg.demandMax, cfg.priceThreshold);
 
     // Pressure-relief customers (e-fuel) scale their intake with pressure.
     if (cfg?.pressureRelief) {
@@ -57,18 +49,15 @@ export function updateEcon(): void {
   }
 
   // Simple pressure-price model: fuller pipe = cheaper hydrogen.
-  const targetSpotPrice = priceFromPressure(s.networkPressure);
-  s.spotPrice += (targetSpotPrice - s.spotPrice) * PRICE_RESPONSE_SPEED;
-  s.spotPrice = Math.max(PRESSURE_PRICE_MIN, Math.min(PRESSURE_PRICE_MAX, s.spotPrice));
+  s.spotPrice = priceFromPressure(s.networkPressure);
 
   // Connected regions share one network pressure, so they also share one
   // network-clearing price. Disconnected regions stay at the scarcity cap.
   for (const rc of REGIONS) {
     const rs = s.regions[rc.id];
-    const targetLocalPrice = rs.pipeConnections > 0
+    rs.localPrice = rs.pipeConnections > 0
       ? s.spotPrice
       : PRESSURE_PRICE_MAX;
-    rs.localPrice += (targetLocalPrice - rs.localPrice) * PRICE_RESPONSE_SPEED;
     rs.localPrice = Math.max(PRESSURE_PRICE_MIN, Math.min(PRESSURE_PRICE_MAX, rs.localPrice));
   }
 
@@ -131,11 +120,11 @@ function priceFromPressure(pressure: number): number {
   return PRESSURE_PRICE_MAX - curved * (PRESSURE_PRICE_MAX - PRESSURE_PRICE_MIN);
 }
 
-function demandFactorFromPrice(price: number, threshold: number): number {
+function demandFromPrice(price: number, demandMin: number, demandMax: number, threshold: number): number {
   const safeThreshold = Math.max(0.5, threshold);
   const x = (safeThreshold - price) / safeThreshold * DEMAND_PRICE_RESPONSE;
   const curved = sigmoid(x);
-  return DEMAND_PRICE_MIN + curved * (DEMAND_PRICE_MAX - DEMAND_PRICE_MIN);
+  return demandMin + curved * (demandMax - demandMin);
 }
 
 function sigmoid(x: number): number {
