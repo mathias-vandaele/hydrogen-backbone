@@ -25,10 +25,11 @@ export function initInput(): void {
   if (!canvas) throw new Error('Map not initialized');
 
   canvas.addEventListener('mousemove', e => {
-    input.mx = e.clientX;
-    input.my = e.clientY;
+    const { x, y } = getCanvasPointer(canvas, e);
+    input.mx = x;
+    input.my = y;
     mapView.hoveredRegion = hitTest(input.mx, input.my);
-    updateRegionTooltip(mapView.hoveredRegion, input.mx, input.my);
+    updateRegionTooltip(mapView.hoveredRegion, e.clientX, e.clientY);
   });
 
   canvas.addEventListener('mouseleave', () => {
@@ -37,8 +38,9 @@ export function initInput(): void {
   });
 
   canvas.addEventListener('click', e => {
-    input.mx = e.clientX;
-    input.my = e.clientY;
+    const { x, y } = getCanvasPointer(canvas, e);
+    input.mx = x;
+    input.my = y;
     handleClick();
   });
 
@@ -58,6 +60,14 @@ export function initInput(): void {
       showToast(on ? 'Production debug ON — check console' : 'Production debug OFF');
     }
   });
+}
+
+function getCanvasPointer(canvas: HTMLCanvasElement, e: MouseEvent): { x: number; y: number } {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: e.clientX - rect.left,
+    y: e.clientY - rect.top
+  };
 }
 
 /**

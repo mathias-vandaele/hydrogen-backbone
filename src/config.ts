@@ -79,8 +79,10 @@ export const OPEX_ANNUAL_FRACTION = {
   NUCLEAR_PLANT: 0.025  // 2.5%/yr of CAPEX
 };
 
-// Alkaline electrolyzer, LHV basis. PEM sits at 60-68%; SOEC approaches
-// 80% but is not yet mass-deployed. 70% is a defensible 2024 benchmark.
+// Baseline alkaline electrolyzer efficiency, LHV basis. PEM sits at 60-68%;
+// SOEC approaches 80% but is not yet mass-deployed. 70% is a defensible
+// 2024 benchmark. Runtime production reads the live value from research.ts;
+// this constant is the tier-0 baseline only.
 // Source: Fraunhofer ISE hydrogen cost studies.
 export const ELECTROLYZER_EFFICIENCY = 0.70;
 
@@ -126,7 +128,9 @@ export const BIG_TIER_CAP = 6;
 // v5: bundled plant CAPEX and nameplate from real 2024 benchmarks
 // (see CAPEX/NAMEPLATE_MW constants + source block above). `baseOutput`
 // is nameplate MW; real capacity factors emerge from day/night + weather
-// + nuclear outage scheduling in buildings.ts.
+// + nuclear outage scheduling in buildings.ts. Electrolyzer efficiency is
+// not stored per-building-config anymore; runtime output resolves through
+// the research system's live efficiency.
 export const BUILDINGS: BuildingsConfigMap = {
   solarPlant: {
     name: 'Solar Hydrogen Plant',
@@ -135,7 +139,6 @@ export const BUILDINGS: BuildingsConfigMap = {
     capacity: NAMEPLATE_MW.SOLAR_HYDROGEN_PLANT,
     baseCost: CAPEX.SOLAR_HYDROGEN_PLANT,
     baseOutput: NAMEPLATE_MW.SOLAR_HYDROGEN_PLANT, // nameplate MW
-    electrolyzerEfficiency: ELECTROLYZER_EFFICIENCY,
     kwhPerKg: KWH_PER_KG_H2,
     quote: '"Solar electricity in southern Europe costs 20 €/MWh today. Co-locate electrolysis; only molecules leave."'
   },
@@ -146,7 +149,6 @@ export const BUILDINGS: BuildingsConfigMap = {
     capacity: NAMEPLATE_MW.WIND_HYDROGEN_PLANT,
     baseCost: CAPEX.WIND_HYDROGEN_PLANT,
     baseOutput: NAMEPLATE_MW.WIND_HYDROGEN_PLANT,
-    electrolyzerEfficiency: ELECTROLYZER_EFFICIENCY,
     kwhPerKg: KWH_PER_KG_H2,
     quote: '"Every MWh of excess wind converts to hydrogen on the spot. There is no such thing as excess."'
   },
@@ -157,7 +159,6 @@ export const BUILDINGS: BuildingsConfigMap = {
     capacity: NAMEPLATE_MW.NUCLEAR_HYDROGEN_PLANT,
     baseCost: CAPEX.NUCLEAR_HYDROGEN_PLANT,
     baseOutput: NAMEPLATE_MW.NUCLEAR_HYDROGEN_PLANT,
-    electrolyzerEfficiency: ELECTROLYZER_EFFICIENCY,
     kwhPerKg: KWH_PER_KG_H2,
     quote: '"Baseload nuclear, electrolysed on-site, 24/7. Raises reactor load factors; only hydrogen enters the pipe."'
   },

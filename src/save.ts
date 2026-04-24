@@ -137,6 +137,7 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!merged.research) merged.research = { ...fresh.research };
   if (typeof merged.research.solar?.tier !== 'number') merged.research.solar = { ...fresh.research.solar };
   if (typeof merged.research.wind?.tier !== 'number') merged.research.wind = { ...fresh.research.wind };
+  if (typeof merged.research.nuclear?.tier !== 'number') merged.research.nuclear = { ...fresh.research.nuclear };
   if (typeof merged.research.electrolyzer?.tier !== 'number') merged.research.electrolyzer = { ...fresh.research.electrolyzer };
   if (typeof merged.lastSavedAt !== 'number') merged.lastSavedAt = 0;
   if (typeof merged.dailyRevenue !== 'number') merged.dailyRevenue = 0;

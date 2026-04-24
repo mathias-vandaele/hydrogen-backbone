@@ -1,5 +1,4 @@
 import { canBuild } from './buildings';
-import { drawBudgetChart, drawPriceChart } from './chart';
 import {
   BUILDINGS,
   CUSTOMER_TYPES,
@@ -167,20 +166,6 @@ function drawDashboard(ctx: CanvasRenderingContext2D, w: number, h: number): voi
   const gaugeCX = w - margin - gaugeRadius;
   const gaugeCY = h - bottomBar - margin - gaugeRadius;
   drawGauge(ctx, gaugeCX, gaugeCY, gaugeRadius, state.networkPressure, 0, MAX_PRESSURE);
-
-  // Price trajectory chart — thresholds + projection (unchanged).
-  const chartW = 340;
-  const chartH = 110;
-  const chartX = gaugeCX - gaugeRadius - 12 - chartW;
-  const chartY = h - bottomBar - margin - chartH;
-  drawPriceChart(ctx, chartX, chartY, chartW, chartH, 90, 120);
-
-  // v4 Budget history chart — stacked above the price chart. Seeing the
-  // budget line approach the red bankruptcy floor is the visceral
-  // feedback loop scarcity needs.
-  const budgetH = 70;
-  const budgetY = chartY - budgetH - 8;
-  drawBudgetChart(ctx, chartX, budgetY, chartW, budgetH, 180);
 }
 
 // ─── Placement ghost (floating icon while in build mode) ─────────────────

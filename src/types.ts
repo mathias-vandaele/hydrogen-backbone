@@ -35,7 +35,6 @@ export interface HydrogenPlantConfig {
   capacity: number;      // generator nameplate MW
   baseCost: number;
   baseOutput: number;    // nameplate electricity MW used internally
-  electrolyzerEfficiency: number;  // 0..1 (electron → molecule ratio)
   kwhPerKg: number;
   quote: string;
 }
@@ -227,7 +226,7 @@ export interface MilestoneFlags {
   researchComplete: boolean;
 }
 
-export type ResearchTrackName = 'solar' | 'wind' | 'electrolyzer';
+export type ResearchTrackName = 'solar' | 'wind' | 'nuclear' | 'electrolyzer';
 
 export interface ResearchTrack {
   /** Integer 0..5. 0 is baseline (no research); 5 is fully researched. */
@@ -237,6 +236,7 @@ export interface ResearchTrack {
 export interface ResearchState {
   solar: ResearchTrack;
   wind: ResearchTrack;
+  nuclear: ResearchTrack;
   electrolyzer: ResearchTrack;
 }
 

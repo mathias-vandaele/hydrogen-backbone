@@ -65,6 +65,7 @@ function evaluateType(
 ): {
   priceRatio: number;
   headroom: number;
+  requiredHeadroom: number;
   supplyOK: boolean;
   tierOK: boolean;
   slotOK: boolean;
@@ -72,13 +73,14 @@ function evaluateType(
 } {
   const priceRatio = state.spotPrice / Math.max(0.001, cfg.priceThreshold);
   const headroom = rollingSupply - totalDemand;
-  const supplyOK = headroom >= cfg.expectedDemand * CUSTOMER_SUPPLY_BUFFER_MULTIPLIER;
+  const requiredHeadroom = cfg.demandMin * CUSTOMER_SUPPLY_BUFFER_MULTIPLIER;
+  const supplyOK = headroom >= requiredHeadroom;
   const tierOK = getReservedTierPopulation(cfg.tier) < getTierCap(cfg.tier);
   const slotOK = getEligibleRegions(cfg).length > 0;
   const dailyProbability = (!tierOK || !slotOK || !supplyOK)
     ? 0
     : emergenceDailyProbability(priceRatio);
-  return { priceRatio, headroom, supplyOK, tierOK, slotOK, dailyProbability };
+  return { priceRatio, headroom, requiredHeadroom, supplyOK, tierOK, slotOK, dailyProbability };
 }
 
 function emergenceDailyProbability(priceRatio: number): number {

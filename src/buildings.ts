@@ -304,7 +304,8 @@ function nuclearAvailability(b: Building, gameDay: number): number {
  *   Nuclear: electricity_MW = nameplate × nuclearAvailability
  *              0 during outage, nameplate otherwise. No weather.
  *
- * Hydrogen output uses the shared formula:
+ * Hydrogen output uses the shared formula, with efficiency taken from the
+ * live research state rather than a static building config field:
  *   h2_kg_per_day = electricity_MW × 24 × 1000 × EFFICIENCY / KWH_PER_KG_H2
  */
 export function updateProduction(): void {

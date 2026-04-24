@@ -51,6 +51,8 @@ html, body {
   backdrop-filter: blur(8px);
 }
 .hud-item { display: flex; align-items: center; gap: 6px; }
+.hud-action { cursor: pointer; }
+.hud-action#research-toggle { margin-left: auto; }
 .hud-label { color: var(--text2); font-size: 11px; text-transform: uppercase; letter-spacing: 1px; }
 .hud-value { color: var(--cyan); font-size: 15px; font-weight: bold; text-shadow: var(--glow); }
 .hud-value.warn { color: var(--warn); }
@@ -83,7 +85,7 @@ html, body {
 }
 
 /* Speed Controls */
-#speed-controls { display: flex; gap: 4px; margin-left: auto; }
+#speed-controls { display: flex; gap: 4px; }
 #speed-controls button {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -192,7 +194,7 @@ html, body {
 }
 #research-cards {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   padding: 8px 14px 0;
 }
@@ -275,6 +277,39 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 1px;
   margin-bottom: 4px;
+}
+#info-panel .info-action-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 8px 10px;
+  background: rgba(6, 214, 160, 0.08);
+  border: 1px solid rgba(6, 214, 160, 0.45);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: var(--font);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+#info-panel .info-action-btn:hover {
+  background: rgba(6, 214, 160, 0.14);
+  border-color: var(--cyan);
+  box-shadow: var(--glow);
+}
+#info-panel .info-action-cost {
+  color: var(--cyan);
+  font-size: 11px;
+  white-space: nowrap;
+}
+#info-panel .info-action-meta {
+  margin-top: 6px;
+  color: #94a3b8;
+  font-size: 11px;
+  line-height: 1.4;
 }
 .manifesto-quote {
   padding: 8px 12px;
@@ -604,6 +639,53 @@ html, body {
   }
   #research-cards {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 1280px) {
+  #build-menu {
+    width: 180px;
+  }
+  #info-panel {
+    width: 220px;
+  }
+  #hud-top {
+    gap: 14px;
+    padding: 0 10px;
+  }
+  .hud-label {
+    font-size: 10px;
+    letter-spacing: 0.6px;
+  }
+  .hud-value {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 1024px) {
+  #info-panel {
+    right: 10px;
+    width: min(320px, calc(100vw - 20px));
+    max-height: 42vh;
+  }
+  #status-bar {
+    height: auto;
+    min-height: 36px;
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+  #status-bar .status-group {
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+  #status-bar .status-economy {
+    justify-content: flex-start;
+    padding: 0;
+    border: none;
+  }
+  #status-bar .status-network {
+    margin-left: 0;
   }
 }
 

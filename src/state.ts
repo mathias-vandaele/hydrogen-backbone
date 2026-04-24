@@ -75,6 +75,7 @@ export function createInitialState(): GameState {
     research: {
       solar: { tier: 0 },
       wind: { tier: 0 },
+      nuclear: { tier: 0 },
       electrolyzer: { tier: 0 }
     },
     lastSavedAt: 0,

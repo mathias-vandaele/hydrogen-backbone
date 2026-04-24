@@ -65,6 +65,7 @@ const MILESTONES: Milestone[] = [
     check: () =>
       state.research.solar.tier >= 3 ||
       state.research.wind.tier >= 3 ||
+      state.research.nuclear.tier >= 3 ||
       state.research.electrolyzer.tier >= 3,
     insight: {
       title: "Wright's Law",
@@ -78,6 +79,7 @@ const MILESTONES: Milestone[] = [
     check: () =>
       state.research.solar.tier >= MAX_RESEARCH_TIER &&
       state.research.wind.tier >= MAX_RESEARCH_TIER &&
+      state.research.nuclear.tier >= MAX_RESEARCH_TIER &&
       state.research.electrolyzer.tier >= MAX_RESEARCH_TIER,
     insight: {
       title: 'The Curve Bends',

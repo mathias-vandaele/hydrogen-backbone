@@ -39,6 +39,7 @@ export interface RegionPath {
 export const mapView = {
   canvas: null as HTMLCanvasElement | null,
   ctx: null as CanvasRenderingContext2D | null,
+  dpr: 1,
   width: 0,
   height: 0,
   mapX: 0,
@@ -191,6 +192,7 @@ export function resizeMap(): void {
   if (!canvas || !ctx) return;
 
   const dpr = window.devicePixelRatio || 1;
+  mapView.dpr = dpr;
   mapView.width = window.innerWidth;
   mapView.height = window.innerHeight;
   canvas.width = mapView.width * dpr;
@@ -199,11 +201,12 @@ export function resizeMap(): void {
   canvas.style.height = `${mapView.height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-  const pad = MAP_PADDING;
-  mapView.mapX = 220;
-  mapView.mapY = 58;
-  mapView.mapW = mapView.width - 220 - 280;
-  mapView.mapH = mapView.height - 58 - 36;
+  const layout = computeResponsiveMapRect();
+  const pad = Math.min(MAP_PADDING, 24);
+  mapView.mapX = layout.x;
+  mapView.mapY = layout.y;
+  mapView.mapW = layout.w;
+  mapView.mapH = layout.h;
 
   // Fit all raw ring points into the allotted canvas rect, uniform scale.
   const allRings: Point[][] = [];
@@ -215,6 +218,26 @@ export function resizeMap(): void {
   mapView.kmPerPx = 1 / (mapView.fitTransform.scale * 1000);
 
   rebuildPaths();
+}
+
+function computeResponsiveMapRect(): { x: number; y: number; w: number; h: number } {
+  const topBarH = 58;
+  const statusBarH = 36;
+  const edge = 10;
+  const buildMenu = document.querySelector<HTMLElement>('#build-menu');
+  const infoPanel = document.querySelector<HTMLElement>('#info-panel');
+  const buildW = buildMenu?.offsetWidth ?? 200;
+  const infoVisible = infoPanel && infoPanel.style.display !== 'none';
+  const infoW = infoVisible ? (infoPanel?.offsetWidth ?? 260) : 0;
+  const availableW = mapView.width;
+
+  const stacked = availableW < 1280;
+  const x = stacked ? edge : buildW + edge * 2;
+  const y = topBarH;
+  const rightInset = stacked ? edge : infoW + edge * 2;
+  const w = Math.max(320, availableW - x - rightInset);
+  const h = Math.max(240, mapView.height - topBarH - statusBarH);
+  return { x, y, w, h };
 }
 
 /**
@@ -271,8 +294,10 @@ function rebuildPaths(): void {
 export function hitTest(mx: number, my: number): string | null {
   const ctx = mapView.ctx;
   if (!ctx) return null;
+  const px = mx * mapView.dpr;
+  const py = my * mapView.dpr;
   for (const rp of mapView.regionPaths) {
-    if (ctx.isPointInPath(rp.path, mx, my)) return rp.id;
+    if (ctx.isPointInPath(rp.path, px, py)) return rp.id;
   }
   return null;
 }

@@ -4,13 +4,12 @@ import {
   BIG_TIER_CAP,
   BUILDINGS,
   CUSTOMER_TYPES,
-  CUSTOMER_SUPPLY_BUFFER_MULTIPLIER,
   MID_TIER_CAP,
   SALT_CAVERN_ELIGIBLE_REGIONS,
   SMALL_TIER_CAP,
   getRegionConfig
 } from './config';
-import { getCurrentTotalDemand, getTierPopulationSummary } from './customers';
+import { getTierPopulationSummary } from './customers';
 import { $, $$, $maybe } from './dom';
 import {
   getRollingAverageDemand,
@@ -26,7 +25,6 @@ import { mapView } from './map';
 import { getNetworkStorageCapacityKg } from './pressure';
 import {
   buyResearchTier,
-  getCurrentPriceBand,
   getElectrolyzerEfficiency,
   getNextTierCost,
   getTotalResearchTiers,
@@ -48,6 +46,7 @@ export function computeRunwayDays(): number {
 }
 
 let toastTimer: number | undefined;
+let lastResearchPanelSignature = '';
 
 /**
  * One-time UI wiring after DOM is ready: populate build costs, attach
@@ -138,6 +137,7 @@ function hideBuildQuote(): void {
 export function updateHUD(): void {
   const s = state;
   updateResearchPanel();
+  syncResearchAffordability();
 
   // Budget now shown as signed — can go negative in v4. `warn` below €30M,
   // `danger` when negative.
@@ -186,26 +186,7 @@ export function updateHUD(): void {
   netEl.classList.toggle('bad', net < 0);
 
   // Network group.
-  const ratio = avgDemand > 0 ? avgSupply / avgDemand : (avgSupply > 0 ? Infinity : 0);
-  const priceBand = getCurrentPriceBand(s);
-  const totalResearchTiers = getTotalResearchTiers(s);
-  const priceBandEl = $('#stat-price-band');
-  priceBandEl.textContent = `€${priceBand.min.toFixed(1)} – €${priceBand.max.toFixed(1)}/kg (${totalResearchTiers}/15 tiers)`;
-  const ratioEl = $('#stat-supply-ratio');
-  const ratioText = Number.isFinite(ratio) ? ratio.toFixed(2) : '∞';
   const tierSummary = getTierPopulationSummary();
-  const smallestTierHeadroom = Math.min(
-    ...Object.values(CUSTOMER_TYPES)
-      .filter(cfg => cfg.tier === 'small')
-      .map(cfg => cfg.expectedDemand * CUSTOMER_SUPPLY_BUFFER_MULTIPLIER)
-  );
-  const headroom = avgSupply - getCurrentTotalDemand();
-  const ratioStatus = headroom >= smallestTierHeadroom
-    ? `headroom open (${fmtNum(headroom)} kg/day)`
-    : `headroom low (${fmtNum(headroom)} kg/day)`;
-  ratioEl.textContent = `${ratioText} (${ratioStatus})`;
-  ratioEl.classList.toggle('good', headroom >= smallestTierHeadroom);
-  ratioEl.classList.toggle('bad', headroom < smallestTierHeadroom);
   $('#stat-customers').textContent = `Small ${tierSummary.small.live}/${SMALL_TIER_CAP} · Mid ${tierSummary.mid.live}/${MID_TIER_CAP} · Big ${tierSummary.big.live}/${BIG_TIER_CAP}`;
   const storageEl = $maybe('#stat-storage-capacity');
   if (storageEl) storageEl.textContent = fmtTonnes(getNetworkStorageCapacityKg());
@@ -462,7 +443,7 @@ export function showRegionInfo(regionId: string): void {
       html += row('Salt Cavern', 'Online — awaiting pipeline connection');
     }
   } else if (SALT_CAVERN_ELIGIBLE_REGIONS[regionId]) {
-    html += `<div class="info-section"><h4>Salt Cavern</h4><button id="info-build-cavern" class="tut-btn" style="width:100%">Build Salt Cavern (€${fmtMoney(BUILDINGS.saltCavern.baseCost)})</button><div style="margin-top:6px;font-size:11px;color:#94a3b8">2 Mm³ · ~15,000 tonnes H₂ · immediate backbone storage</div></div>`;
+    html += `<div class="info-section"><h4>Salt Cavern</h4><button id="info-build-cavern" class="info-action-btn">Build Salt Cavern <span class="info-action-cost">€${fmtMoney(BUILDINGS.saltCavern.baseCost)}</span></button><div class="info-action-meta">2 Mm³ · ~15,000 tonnes H₂ · immediate backbone storage</div></div>`;
   }
 
   if (buildings.length > 0) {
@@ -560,12 +541,6 @@ export function toggleSaveMenu(): void {
   updateSaveTimestamp();
 }
 
-export function toggleResearchPanel(): void {
-  const panel = $('#research-panel');
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-  if (panel.style.display === 'block') updateResearchPanel();
-}
-
 function investInResearch(track: ResearchTrackName): void {
   const nextCost = getNextTierCost(state, track);
   if (nextCost === null) {
@@ -582,17 +557,31 @@ function investInResearch(track: ResearchTrackName): void {
   showToast(`${labelResearchTrack(track)} research advanced to tier ${state.research[track].tier}.`);
 }
 
+export function toggleResearchPanel(): void {
+  const panel = $('#research-panel');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+  if (panel.style.display === 'block') updateResearchPanel();
+}
+
 function updateResearchPanel(): void {
   const summary = $maybe('#research-summary');
   const cards = $maybe('#research-cards');
   if (!summary || !cards) return;
-  const band = getCurrentPriceBand(state);
+  const signature = JSON.stringify({
+    solar: state.research.solar.tier,
+    wind: state.research.wind.tier,
+    nuclear: state.research.nuclear.tier,
+    electrolyzer: state.research.electrolyzer.tier
+  });
+  if (signature === lastResearchPanelSignature) return;
+  lastResearchPanelSignature = signature;
   const tiers = getTotalResearchTiers(state);
   summary.innerHTML =
-    `Wright-style learning cuts new plant CAPEX and compresses the market price band.` +
-    `<br>Current band: <strong>€${band.min.toFixed(1)} – €${band.max.toFixed(1)}/kg</strong> · Research progress: <strong>${tiers}/15 tiers</strong>.`;
-  const tracks: ResearchTrackName[] = ['solar', 'wind', 'electrolyzer'];
+    `Wright-style learning cuts new plant CAPEX and steadily lowers the hydrogen price the network can sustain.` +
+    `<br>Research progress: <strong>${tiers}/20 tiers</strong>.`;
+  const tracks: ResearchTrackName[] = ['solar', 'wind', 'nuclear', 'electrolyzer'];
   cards.innerHTML = tracks.map(renderResearchCard).join('');
+  syncResearchAffordability();
 }
 
 function renderResearchCard(track: ResearchTrackName): string {
@@ -613,6 +602,21 @@ function renderResearchCard(track: ResearchTrackName): string {
   </div>`;
 }
 
+function syncResearchAffordability(): void {
+  const cards = $maybe('#research-cards');
+  if (!cards) return;
+  const buttons = cards.querySelectorAll<HTMLButtonElement>('[data-research-track]');
+  buttons.forEach(btn => {
+    const track = btn.dataset.researchTrack as ResearchTrackName | undefined;
+    if (!track) return;
+    const nextCost = getNextTierCost(state, track);
+    if (nextCost === null) return;
+    const affordable = state.money >= nextCost;
+    btn.disabled = !affordable;
+    btn.textContent = `${affordable ? 'Invest' : 'Insufficient budget'} · €${fmtMoney(nextCost)}`;
+  });
+}
+
 function getResearchCardLines(track: ResearchTrackName, tier: number): { current: string; next: string } {
   if (track === 'solar') {
     const current = tier === 0 ? 'baseline solar generator CAPEX' : `-${tier * 10}% solar generator CAPEX`;
@@ -622,6 +626,11 @@ function getResearchCardLines(track: ResearchTrackName, tier: number): { current
   if (track === 'wind') {
     const current = tier === 0 ? 'baseline wind generator CAPEX' : `-${tier * 10}% wind generator CAPEX`;
     const next = tier >= MAX_RESEARCH_TIER ? 'maxed' : `-${(tier + 1) * 10}% wind generator CAPEX`;
+    return { current, next };
+  }
+  if (track === 'nuclear') {
+    const current = tier === 0 ? 'baseline nuclear reactor CAPEX' : `-${tier * 10}% nuclear reactor CAPEX`;
+    const next = tier >= MAX_RESEARCH_TIER ? 'maxed' : `-${(tier + 1) * 10}% nuclear reactor CAPEX`;
     return { current, next };
   }
   const current = tier === 0
@@ -637,6 +646,7 @@ function labelResearchTrack(track: ResearchTrackName): string {
   switch (track) {
     case 'solar': return 'Solar';
     case 'wind': return 'Wind';
+    case 'nuclear': return 'Nuclear';
     case 'electrolyzer': return 'Electrolyzer';
   }
 }
