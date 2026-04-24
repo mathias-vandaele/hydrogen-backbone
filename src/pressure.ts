@@ -1,4 +1,6 @@
 import { playWhoosh } from './audio';
+import { BUILDINGS } from './config';
+import { getConnectedOperationalCavernCapacityKg } from './buildings';
 import { MAX_PRESSURE, REGIONS, TICKS_PER_DAY } from './config';
 import { state } from './state';
 
@@ -37,6 +39,7 @@ export function solvePressure(): void {
     }
   }
   for (const pipe of s.pipes) totalCapacity += pipe.linepackCapacity;
+  totalCapacity += getConnectedOperationalCavernCapacityKg();
 
   const injectedThisTick = connectedSupplyRate / TICKS_PER_DAY;
   const withdrawnThisTick = connectedDemandRate / TICKS_PER_DAY;
@@ -62,9 +65,22 @@ export function solvePressure(): void {
     pipe.linepackStored = pipe.linepackCapacity * pressureRatio;
   }
 
+  for (const cavern of s.caverns) {
+    const rs = s.regions[cavern.regionId];
+    const connected = cavern.operational && rs?.pipeConnections > 0;
+    cavern.storedH2Kg = connected ? BUILDINGS.saltCavern.storageKg * pressureRatio : 0;
+  }
+
   // Rising-edge threshold crossings → play a whoosh so the player feels it.
   for (const thr of WHOOSH_THRESHOLDS) {
     if (prevNetworkPressure < thr && s.networkPressure >= thr) playWhoosh();
   }
   prevNetworkPressure = s.networkPressure;
+}
+
+export function getNetworkStorageCapacityKg(): number {
+  let total = 0;
+  for (const pipe of state.pipes) total += pipe.linepackCapacity;
+  total += getConnectedOperationalCavernCapacityKg();
+  return total;
 }

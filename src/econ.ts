@@ -10,7 +10,6 @@ import {
   TICKS_PER_DAY
 } from './config';
 import type { GameState } from './types';
-import { spawnPressurePulse } from './particles';
 import { state } from './state';
 
 /**
@@ -90,9 +89,6 @@ export function updateEcon(): void {
     tickRevenue += revenue;
     c.satisfaction = supplyRatio;
     s.totalH2Sold += servedPerTick;
-    if (servedPerTick > 0 && rs.pipeConnections > 0 && Math.random() < 0.015) {
-      spawnPressurePulse(c.regionId, 'withdraw', Math.min(1, servedPerTick / 500));
-    }
   }
 
   s.money += tickRevenue;

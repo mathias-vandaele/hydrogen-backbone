@@ -1,5 +1,4 @@
 import { updateFinancialAudio } from './audio';
-import { updateParticles } from './particles';
 import { drawFrame } from './renderer';
 import { state } from './state';
 import { tick } from './sim';
@@ -17,8 +16,8 @@ let simAccum = 0;
 /**
  * One animation frame: accumulate wall-time into simAccum, drain it in
  * fixed 100 ms chunks (capped at 50 per frame to avoid spiral-of-death
- * after a long tab-background), advance particles at render rate for
- * smooth interpolation, draw the frame, and refresh the HUD at ~15 Hz.
+ * after a long tab-background), draw the frame, and refresh the HUD at
+ * ~15 Hz.
  */
 function frame(timestamp: number): void {
   const dt = Math.min(100, timestamp - lastTime);
@@ -33,9 +32,6 @@ function frame(timestamp: number): void {
     // than run hundreds of sim ticks at once.
     if (simAccum > SIM_INTERVAL * 10) simAccum = 0;
   }
-
-  // Particles always tick at render rate for smooth visuals.
-  updateParticles(dt);
 
   drawFrame(timestamp);
 

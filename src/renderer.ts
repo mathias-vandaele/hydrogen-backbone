@@ -10,11 +10,10 @@ import {
 } from './config';
 import { drawGauge } from './gauge';
 import { input } from './input';
-import { distanceBetween, gasCorridorScreenPaths, getCenter, getRegionCentroidLL, mapView } from './map';
-import { drawParticles } from './particles';
+import { distanceBetween, gasCorridorScreenPaths, getCenter, mapView } from './map';
 import { state } from './state';
 import { fmtMoney } from './ui';
-import { getSeasonalTint, getSunElevationAt, getWeatherAt } from './weather';
+import { getSeasonalTint } from './weather';
 
 const render = {
   lastTime: 0,
@@ -22,12 +21,11 @@ const render = {
 };
 
 /**
- * Render one frame. Back-to-front order matters: backdrop, regions with
- * day/night shading, weather overlays (clouds, wind), seasonal tint,
- * existing gas corridors, region flashes, pipes, pipe preview, junction
- * glow, particles, buildings, customers, placement ghost, then the
- * foreground dashboard (gauge + chart). DOM tooltips live outside this
- * entirely.
+ * Render one frame. Back-to-front order matters: backdrop, seasonal
+ * atmosphere, regions, existing gas corridors, region flashes, pipes,
+ * pipe preview, junction glow, buildings, customers, placement ghost,
+ * then the foreground dashboard (gauge + chart). DOM tooltips live
+ * outside this entirely.
  */
 export function drawFrame(timestamp: number): void {
   const ctx = mapView.ctx;
@@ -42,21 +40,79 @@ export function drawFrame(timestamp: number): void {
   ctx.fillStyle = '#060a12';
   ctx.fillRect(0, 0, w, h);
 
+  drawSeasonAtmosphere(ctx, w, h);
   drawGrid(ctx, w, h);
   drawRegions(ctx);
-  drawCloudShadows(ctx);
-  drawWindStreaks(ctx);
-  drawSeasonalTint(ctx, w, h);
   drawGasCorridors(ctx);
   drawRegionFlashes(ctx);
   drawPipes(ctx);
   drawPipePreview(ctx);
   drawJunctions(ctx);
-  drawParticles(ctx);
   drawBuildings(ctx);
+  drawSaltCaverns(ctx);
   drawCustomers(ctx);
   drawPlacementGhost(ctx);
   drawDashboard(ctx, w, h);
+}
+
+// ─── Seasonal atmosphere ─────────────────────────────────────────────────
+
+/**
+ * Slow-moving seasonal light wash behind the map. Uses the existing
+ * calendar tint as the palette source, then drifts two very large radial
+ * gradients over the canvas at a barely-noticeable pace so the world
+ * feels alive without flicker or visual noise.
+ */
+function drawSeasonAtmosphere(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const tint = getSeasonalTint(state.dayOfYear);
+  const phase = render.animPhase * 0.06;
+  const driftX = Math.sin(phase) * w * 0.08;
+  const driftY = Math.cos(phase * 0.7) * h * 0.06;
+
+  const warm = {
+    r: Math.min(255, tint.r + 28),
+    g: Math.min(255, tint.g + 18),
+    b: Math.min(255, tint.b + 12)
+  };
+  const cool = {
+    r: Math.max(0, tint.r - 32),
+    g: Math.max(0, tint.g - 24),
+    b: Math.max(0, tint.b - 18)
+  };
+
+  ctx.save();
+
+  const primary = ctx.createRadialGradient(
+    w * 0.26 + driftX,
+    h * 0.22 + driftY,
+    0,
+    w * 0.26 + driftX,
+    h * 0.22 + driftY,
+    Math.max(w, h) * 0.7
+  );
+  primary.addColorStop(0, `rgba(${warm.r},${warm.g},${warm.b},0.16)`);
+  primary.addColorStop(0.55, `rgba(${tint.r},${tint.g},${tint.b},0.08)`);
+  primary.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = primary;
+  ctx.fillRect(0, 0, w, h);
+
+  const secondary = ctx.createRadialGradient(
+    w * 0.78 - driftX * 0.6,
+    h * 0.78 - driftY * 0.5,
+    0,
+    w * 0.78 - driftX * 0.6,
+    h * 0.78 - driftY * 0.5,
+    Math.max(w, h) * 0.62
+  );
+  secondary.addColorStop(0, `rgba(${cool.r},${cool.g},${cool.b},0.10)`);
+  secondary.addColorStop(0.7, `rgba(${cool.r},${cool.g},${cool.b},0.04)`);
+  secondary.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = secondary;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = `rgba(${tint.r},${tint.g},${tint.b},0.035)`;
+  ctx.fillRect(0, 0, w, h);
+  ctx.restore();
 }
 
 // ─── Region flashes (triggered when new customers emerge) ─────────────────
@@ -210,14 +266,12 @@ function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   }
 }
 
-// ─── Regions (with per-region day/night darken) ──────────────────────────
+// ─── Regions ──────────────────────────────────────────────────────────────
 
 /**
- * Render every region polygon with four composited layers per region:
- * base fill (dark steel, brighter if hovered/selected), supply-intensity
- * cyan tint, per-region day/night darkening from sun elevation, and
- * outline. Overlays the region's abbreviation label and a small
- * pressure-bar readout for connected regions.
+ * Render every region polygon with base fill, supply-intensity cyan tint,
+ * slot-fill warm tint, and outline. Overlays the region's abbreviation
+ * label and a small pressure-bar readout for connected regions.
  */
 function drawRegions(ctx: CanvasRenderingContext2D): void {
   ctx.lineJoin = 'round';
@@ -249,22 +303,7 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
       ctx.fill(rp.path);
     }
 
-    // Day/night: darken based on the region centroid's illumination
     const centroid = rp.region.centroid;
-    // Find the centroid longitude from the raw feature. We don't have it
-    // directly, but we can approximate from the centroid X vs map span;
-    // weather module already computes sun elev from real lon, so we look it
-    // up via getWeatherAt-style helper. However weather only exposes sample
-    // fields, not lon. Instead, approximate lon by inverting the fit — but
-    // that requires full unproject. Simpler: store lon on the region.
-    const lon = regionLon(rp.id);
-    const elev = getSunElevationAt(lon);
-    // Map elev (-1..1) → darkness (0 daylight, ~0.55 midnight)
-    const darkness = Math.max(0, Math.min(0.55, (0.25 - elev) * 0.7));
-    if (darkness > 0.01) {
-      ctx.fillStyle = `rgba(5,8,20,${darkness})`;
-      ctx.fill(rp.path);
-    }
 
     // Stroke
     ctx.strokeStyle = isSelected ? '#06d6a0' : isHovered ? 'rgba(6,214,160,0.6)' : 'rgba(30,58,95,0.55)';
@@ -303,107 +342,6 @@ function slotFillRatio(regionId: string): number {
   if (cap <= 0) return 0;
   const live = state.customers.filter(c => c.active && c.regionId === regionId).length;
   return Math.min(1, live / cap);
-}
-
-// Cache region centroid longitudes — they don't change at runtime.
-const regionLonCache = new Map<string, number>();
-
-/**
- * Memoized centroid-longitude lookup so drawRegions doesn't call through
- * to the map module 13× per frame for a value that's fixed at init.
- */
-function regionLon(id: string): number {
-  const cached = regionLonCache.get(id);
-  if (cached !== undefined) return cached;
-  const ll = getRegionCentroidLL(id);
-  const lon = ll ? ll.lon : 3;
-  regionLonCache.set(id, lon);
-  return lon;
-}
-
-// ─── Cloud shadows (drifting blurred blobs) ──────────────────────────────
-
-/**
- * One soft dark blob per cloudy region, drifting downwind. Uses
- * `multiply` blend mode + canvas blur so the blobs darken the regions
- * beneath without leaking over the black backdrop. Skips regions with
- * cloud cover below 25% so clear weather reads as clear.
- */
-function drawCloudShadows(ctx: CanvasRenderingContext2D): void {
-  ctx.save();
-  // Soft shadows; the blur filter is cheap for a dozen circles.
-  ctx.filter = 'blur(22px)';
-  ctx.globalCompositeOperation = 'multiply';
-  const drift = render.animPhase * 18;
-  for (const rp of mapView.regionPaths) {
-    const w = getWeatherAt(rp.id);
-    if (w.clouds < 0.25) continue;
-    const c = rp.region.centroid;
-    const dx = Math.cos(w.windDirection) * drift;
-    const dy = Math.sin(w.windDirection) * drift;
-    const radius = 45 + w.clouds * 60;
-    const alpha = 0.08 + w.clouds * 0.35;
-    ctx.fillStyle = `rgba(10,14,28,${alpha})`;
-    ctx.beginPath();
-    ctx.arc(c.x + dx, c.y + dy, radius, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-// ─── Wind streaks (per region with high wind) ────────────────────────────
-
-/**
- * For each region with wind magnitude above 0.45, draw a handful of short
- * streaks oriented along its wind direction, animated by time so they
- * visibly flow. Stateless: the animation state comes entirely from
- * performance.now() — no per-streak bookkeeping needed.
- */
-function drawWindStreaks(ctx: CanvasRenderingContext2D): void {
-  const time = performance.now() * 0.001;
-  ctx.save();
-  for (const rp of mapView.regionPaths) {
-    const w = getWeatherAt(rp.id);
-    if (w.wind < 0.45) continue;
-    const c = rp.region.centroid;
-    const dirX = Math.cos(w.windDirection);
-    const dirY = Math.sin(w.windDirection);
-    const streakLen = 10 + w.wind * 18;
-    const count = 2 + Math.floor(w.wind * 4);
-    const speed = 30 + w.wind * 40;
-    const alpha = Math.min(0.45, w.wind * 0.5);
-    ctx.strokeStyle = `rgba(200,220,255,${alpha})`;
-    ctx.lineWidth = 0.9;
-    ctx.lineCap = 'round';
-    for (let i = 0; i < count; i++) {
-      const phase = ((time * speed + i * 50) % 80) / 80; // 0..1 cycle
-      const offsetAlong = (phase - 0.5) * 70;
-      // Stagger perpendicularly
-      const perpX = -dirY;
-      const perpY = dirX;
-      const perpOffset = ((i * 19) % 40) - 20;
-      const cx = c.x + dirX * offsetAlong + perpX * perpOffset;
-      const cy = c.y + dirY * offsetAlong + perpY * perpOffset;
-      ctx.beginPath();
-      ctx.moveTo(cx - dirX * streakLen * 0.5, cy - dirY * streakLen * 0.5);
-      ctx.lineTo(cx + dirX * streakLen * 0.5, cy + dirY * streakLen * 0.5);
-      ctx.stroke();
-    }
-  }
-  ctx.restore();
-}
-
-// ─── Seasonal tint (global low-alpha overlay) ────────────────────────────
-
-/**
- * Paint the whole canvas with a very thin seasonal-tinted rectangle (blue
- * winter → green spring → amber summer → rust autumn). Sits between
- * regions/weather and pipes so the neon network isn't tinted.
- */
-function drawSeasonalTint(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const tint = getSeasonalTint(state.dayOfYear);
-  ctx.fillStyle = `rgba(${tint.r},${tint.g},${tint.b},0.06)`;
-  ctx.fillRect(0, 0, w, h);
 }
 
 // ─── Real gas corridors (projected polylines, desaturated) ───────────────
@@ -682,6 +620,51 @@ function drawBuildings(ctx: CanvasRenderingContext2D): void {
     ctx.font = '7px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText('H₂', 14, 0);
+    ctx.restore();
+  }
+}
+
+/**
+ * Render salt caverns as grounded storage nodes: a hex ring plus the salt
+ * icon, visually distinct from generators. Connected caverns glow a bit
+ * brighter because they are contributing to backbone storage.
+ */
+function drawSaltCaverns(ctx: CanvasRenderingContext2D): void {
+  for (const cavern of state.caverns) {
+    const center = getCenter(cavern.regionId);
+    const rs = state.regions[cavern.regionId];
+    const connected = (rs?.pipeConnections ?? 0) > 0;
+    const x = center[0] - 18;
+    const y = center[1] + 18;
+
+    ctx.save();
+    ctx.translate(x, y);
+
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = -Math.PI / 2 + i * (Math.PI / 3);
+      const px = Math.cos(angle) * 11;
+      const py = Math.sin(angle) * 11;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+
+    ctx.fillStyle = connected ? 'rgba(91, 33, 182, 0.22)' : 'rgba(71, 85, 105, 0.18)';
+    ctx.fill();
+    ctx.strokeStyle = connected ? 'rgba(196, 181, 253, 0.95)' : 'rgba(148, 163, 184, 0.8)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    if (connected) {
+      ctx.shadowColor = 'rgba(196, 181, 253, 0.55)';
+      ctx.shadowBlur = 10;
+    }
+    ctx.font = '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = connected ? '#ddd6fe' : '#cbd5e1';
+    ctx.fillText('🧂', 0, 0);
     ctx.restore();
   }
 }

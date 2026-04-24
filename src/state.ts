@@ -56,6 +56,7 @@ export function createInitialState(): GameState {
     regions,
     buildings: [],
     pipes: [],
+    caverns: [],
     customers: [],
     nextBuildingId: 1,
     nextPipeId: 1,
@@ -70,7 +71,7 @@ export function createInitialState(): GameState {
       tenPipes: false
     },
     lastSavedAt: 0,
-    version: 4
+    version: 5
   };
 }
 

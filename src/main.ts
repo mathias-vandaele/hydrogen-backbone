@@ -6,7 +6,6 @@ import { $, $$, installRoundRectPolyfill } from './dom';
 import { initInput } from './input';
 import { startLoop } from './loop';
 import { initMap } from './map';
-import { initParticles } from './particles';
 import { logCustomerSlotDiagnostics } from './customers';
 import { loadFromStorageIfPresent, loadGame, rebuildPipeConnections, resetGame, saveGame } from './save';
 import { setSpeed } from './sim';
@@ -35,7 +34,7 @@ function wireTopBar(): void {
 }
 
 /**
- * Application entry point. Order matters: map/audio/particles/input/UI
+ * Application entry point. Order matters: map/audio/input/UI
  * must be initialized before the main loop starts ticking, and load-from-
  * storage must run before initUI so the HUD reflects the loaded state.
  */
@@ -45,7 +44,6 @@ function boot(): void {
 
   initMap();
   initAudio();
-  initParticles();
   initInput();
   initUI();
   initTutorial();

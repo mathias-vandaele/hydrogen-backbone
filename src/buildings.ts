@@ -8,18 +8,19 @@ import {
   NUCLEAR_OUTAGE_DAYS,
   OPEX_ANNUAL_FRACTION,
   REGIONS,
+  SALT_CAVERN_ELIGIBLE_REGIONS,
   TICKS_PER_DAY,
   getRegionConfig
 } from './config';
 import { distanceBetween, getCenter } from './map';
-import { spawnPressurePulse } from './particles';
 import { state } from './state';
 import { fmtMoney, showToast, updateBuildCosts } from './ui';
 import type {
   Building,
   BuildingType,
   HydrogenPlantConfig,
-  PlaceableBuildingType
+  PlaceableBuildingType,
+  SaltCavern
 } from './types';
 
 /**
@@ -42,6 +43,10 @@ export function canBuild(type: BuildingType, regionId: string): boolean {
   if (state.money < cost) return false;
   const rc = getRegionConfig(regionId);
   if (!rc) return false;
+  if (type === 'saltCavern') {
+    if (!SALT_CAVERN_ELIGIBLE_REGIONS[regionId]) return false;
+    return !state.caverns.some(c => c.regionId === regionId);
+  }
   const count = state.buildings.filter(b => b.regionId === regionId).length;
   if (count >= rc.maxSlots) return false;
   if (type === 'nuclearPlant' && rc.nuclearBonus < 0.5) return false;
@@ -58,6 +63,10 @@ export function build(type: BuildingType, regionId: string): void {
   if (type === 'pipeline') return;
   if (!canBuild(type, regionId)) {
     showToast('Cannot build here!');
+    return;
+  }
+  if (type === 'saltCavern') {
+    buildSaltCavern(regionId);
     return;
   }
   const cost = getCost(type);
@@ -91,6 +100,25 @@ export function build(type: BuildingType, regionId: string): void {
 
   playBuild();
   showToast(`${cfg.name} built in ${rc.name}!`);
+  updateBuildCosts();
+}
+
+function buildSaltCavern(regionId: string): void {
+  const rc = getRegionConfig(regionId);
+  if (!rc) return;
+  const cfg = BUILDINGS.saltCavern;
+  state.money -= cfg.baseCost;
+  const cavern: SaltCavern = {
+    regionId,
+    storedH2Kg: 0,
+    builtDay: state.gameDay,
+    onlineDay: state.gameDay,
+    operational: true,
+    cost: cfg.baseCost
+  };
+  state.caverns.push(cavern);
+  playBuild();
+  showToast(`${cfg.name} built in ${rc.name} — network storage expanded.`);
   updateBuildCosts();
 }
 
@@ -220,6 +248,21 @@ export function logProductionDebugIfActive(): void {
   productionDebug.dailyStats.clear();
 }
 
+export function getRegionSaltCavern(regionId: string): SaltCavern | undefined {
+  return state.caverns.find(c => c.regionId === regionId);
+}
+
+export function getConnectedOperationalCavernCapacityKg(): number {
+  let total = 0;
+  for (const cavern of state.caverns) {
+    if (!cavern.operational) continue;
+    const rs = state.regions[cavern.regionId];
+    if (!rs || rs.pipeConnections <= 0) continue;
+    total += BUILDINGS.saltCavern.storageKg;
+  }
+  return total;
+}
+
 /**
  * Is a nuclear plant currently in its planned refuelling outage?
  * Each plant has a phase-offset so outages are spread across the fleet
@@ -299,10 +342,6 @@ export function updateProduction(): void {
         prev.ticks += 1;
         productionDebug.dailyStats.set(b.id, prev);
       }
-
-      if (rs.pipeConnections > 0 && Math.random() < 0.02) {
-        spawnPressurePulse(b.regionId, 'inject', Math.min(1, h2Produced / 2000));
-      }
     }
   }
 }
@@ -313,6 +352,7 @@ function dailyOpexFractionFor(type: PlaceableBuildingType): number {
     case 'solarPlant':   return OPEX_ANNUAL_FRACTION.SOLAR_PLANT / 365;
     case 'windPlant':    return OPEX_ANNUAL_FRACTION.WIND_PLANT / 365;
     case 'nuclearPlant': return OPEX_ANNUAL_FRACTION.NUCLEAR_PLANT / 365;
+    case 'saltCavern':   return 0;
   }
 }
 

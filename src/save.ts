@@ -123,6 +123,7 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!Array.isArray(merged.priceHistory)) merged.priceHistory = [];
   if (!Array.isArray(merged.pressureHistory)) merged.pressureHistory = [];
   if (!Array.isArray(merged.budgetHistory)) merged.budgetHistory = [];
+  if (!Array.isArray(merged.caverns)) merged.caverns = [];
   if (!merged.milestones) merged.milestones = { ...fresh.milestones };
   if (!merged.thresholdCrossings) merged.thresholdCrossings = { ...fresh.thresholdCrossings };
   for (const key of Object.keys(fresh.thresholdCrossings)) {

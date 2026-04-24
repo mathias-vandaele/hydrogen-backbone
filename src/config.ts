@@ -148,6 +148,15 @@ export const BUILDINGS: BuildingsConfigMap = {
     kwhPerKg: KWH_PER_KG_H2,
     quote: '"Baseload nuclear, electrolysed on-site, 24/7. Raises reactor load factors; only hydrogen enters the pipe."'
   },
+  saltCavern: {
+    name: 'Salt Cavern',
+    icon: '🧂',
+    baseCost: 360_000_000,
+    volumeM3: 2_000_000,
+    storageKg: 15_000_000,
+    constructionDays: 180,
+    quote: '"Salt caverns provide the long-duration storage required for multi-week balancing — something batteries cannot deliver economically."'
+  },
   pipeline: {
     name: 'Pipeline',
     icon: '🔗',
@@ -157,6 +166,22 @@ export const BUILDINGS: BuildingsConfigMap = {
     maxPressure: 80,
     quote: '"A hydrogen pipeline network is TCP/IP for energy. The pipe does not care who injects hydrogen or who withdraws it."'
   }
+};
+
+export const SALT_CAVERN_ELIGIBLE_REGIONS: Record<string, boolean> = {
+  'provence-alpes-cote-d-azur': true,
+  'auvergne-rhone-alpes': true,
+  'grand-est': true,
+  'nouvelle-aquitaine': true,
+  'centre-val-de-loire': true,
+  'bourgogne-franche-comte': true,
+  'ile-de-france': true,
+  'bretagne': false,
+  'normandie': false,
+  'hauts-de-france': false,
+  'pays-de-la-loire': false,
+  'occitanie': false,
+  'corse': false
 };
 
 function makeCustomerTier(

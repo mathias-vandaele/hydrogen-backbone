@@ -1,11 +1,12 @@
 import { playClick } from './audio';
-import { getCost } from './buildings';
+import { build, getCost, getRegionSaltCavern } from './buildings';
 import {
   BIG_TIER_CAP,
   BUILDINGS,
   CUSTOMER_TYPES,
   CUSTOMER_SUPPLY_BUFFER_MULTIPLIER,
   MID_TIER_CAP,
+  SALT_CAVERN_ELIGIBLE_REGIONS,
   SMALL_TIER_CAP,
   getRegionConfig
 } from './config';
@@ -22,6 +23,7 @@ import {
 } from './econ';
 import { input } from './input';
 import { mapView } from './map';
+import { getNetworkStorageCapacityKg } from './pressure';
 import { createInitialState, replaceState, state } from './state';
 import { getSeason, getWeatherAt } from './weather';
 import type { BuildingType, Insight } from './types';
@@ -123,9 +125,10 @@ export function updateHUD(): void {
   $('#hud-produced').textContent = fmtTonnes(s.totalH2Produced);
   $('#hud-customers').textContent = String(s.customers.filter(c => c.active).length);
 
-  // Date display (starting Jan 1, 2025)
-  const startDate = new Date(2025, 0, 1);
-  const currentDate = new Date(startDate.getTime() + (s.gameDay - 1) * 86_400_000);
+  // Date display follows the simulation's day-of-year so the visible
+  // calendar stays aligned with weather and seasonality.
+  const currentYear = 2025 + Math.floor((s.gameDay - 1) / 365);
+  const currentDate = new Date(currentYear, 0, s.dayOfYear);
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   $('#hud-day').textContent = `${months[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
   $('#hud-season').textContent = getSeason(s.dayOfYear);
@@ -177,6 +180,8 @@ export function updateHUD(): void {
   ratioEl.classList.toggle('good', headroom >= smallestTierHeadroom);
   ratioEl.classList.toggle('bad', headroom < smallestTierHeadroom);
   $('#stat-customers').textContent = `Small ${tierSummary.small.live}/${SMALL_TIER_CAP} · Mid ${tierSummary.mid.live}/${MID_TIER_CAP} · Big ${tierSummary.big.live}/${BIG_TIER_CAP}`;
+  const storageEl = $maybe('#stat-storage-capacity');
+  if (storageEl) storageEl.textContent = fmtTonnes(getNetworkStorageCapacityKg());
 
   // Runway indicator — the single most important v4 HUD element.
   updateRunwayIndicator();
@@ -286,7 +291,10 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   const rs = state.regions[regionId];
   if (!rc) { tip.style.display = 'none'; return; }
   const w = getWeatherAt(regionId);
-  const buildingCount = state.buildings.filter(b => b.regionId === regionId).length;
+  const buildingCount = state.buildings.filter(b => b.regionId === regionId).length
+    + state.caverns.filter(c => c.regionId === regionId).length;
+  const cavern = getRegionSaltCavern(regionId);
+  const cavernEligible = !!SALT_CAVERN_ELIGIBLE_REGIONS[regionId];
 
   const bar = (label: string, v: number) => {
     const pct = Math.round(v * 100);
@@ -299,10 +307,15 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   html += bar('Nuclear', Math.min(1, rc.nuclearBonus / 1.5));
   html += bar('Industry', Math.min(1, rc.industryDemand));
   if (rc.hasPort) html += `<div class="sub-line">🚢 Port: ${rc.portName}</div>`;
+  html += `<div class="sub-line">🧂 Cavern geology: ${cavernEligible ? 'viable' : 'not suitable (no salt)'}</div>`;
 
   html += `<div class="sub-section">`;
   html += `<div class="sub-line">☁ Cloud ${Math.round(w.clouds * 100)}% · 🌬 Wind ${(w.wind * 100).toFixed(0)}%</div>`;
   html += `<div class="sub-line">🏗 Buildings: ${buildingCount} / ${rc.maxSlots}</div>`;
+  if (cavern) {
+    if (rs.pipeConnections > 0) html += `<div class="sub-line">Salt Cavern: online — contributing to network storage</div>`;
+    else html += `<div class="sub-line">Salt Cavern: online — awaiting pipeline connection</div>`;
+  }
   const avgRegionSupply = getRollingRegionSupply(state, regionId);
   const avgRegionDemand = getRollingRegionDemand(state, regionId);
   if (rs.pipeConnections > 0) {
@@ -352,7 +365,9 @@ export function updateBuildCosts(): void {
       btn.classList.toggle('disabled', state.money < 5_000_000);
     } else {
       const cost = getCost(type as Exclude<BuildingType, 'pipeline'>);
-      costEl.textContent = `€${fmtMoney(cost)}`;
+      costEl.textContent = type === 'saltCavern'
+        ? `€${fmtMoney(cost)} · 2 Mm³`
+        : `€${fmtMoney(cost)}`;
       btn.classList.toggle('disabled', state.money < cost);
     }
   }
@@ -407,20 +422,36 @@ export function showRegionInfo(regionId: string): void {
   html += row('Pipe Connections', String(rs.pipeConnections || 0));
   html += row('Local H₂ Price', `€${rs.localPrice.toFixed(2)}/kg`);
   html += row('Pressure', `${rs.pressure.toFixed(1)} bar`);
+  html += row('Cavern Geology', SALT_CAVERN_ELIGIBLE_REGIONS[regionId] ? 'Viable' : 'Not suitable (no salt)');
   const infoAvgSupply = getRollingRegionSupply(state, regionId);
   const infoAvgDemand = getRollingRegionDemand(state, regionId);
   html += row('Supply (24h avg)', `${Math.round(infoAvgSupply)} kg/day · now ${Math.round(rs.supply)}`);
   html += row('Demand (24h avg)', `${Math.round(infoAvgDemand)} kg/day · now ${Math.round(rs.demand)}`);
+  const cavern = getRegionSaltCavern(regionId);
+  if (cavern) {
+    if (rs.pipeConnections > 0) {
+      html += row('Salt Cavern', 'Online — contributing to network storage');
+    } else {
+      html += row('Salt Cavern', 'Online — awaiting pipeline connection');
+    }
+  } else if (SALT_CAVERN_ELIGIBLE_REGIONS[regionId]) {
+    html += `<div class="info-section"><h4>Salt Cavern</h4><button id="info-build-cavern" class="tut-btn" style="width:100%">Build Salt Cavern (€${fmtMoney(BUILDINGS.saltCavern.baseCost)})</button><div style="margin-top:6px;font-size:11px;color:#94a3b8">2 Mm³ · ~15,000 tonnes H₂ · immediate backbone storage</div></div>`;
+  }
 
   if (buildings.length > 0) {
-    html += `<div class="info-section"><h4>Buildings (${buildings.length}/${rc.maxSlots})</h4>`;
+    html += `<div class="info-section"><h4>Buildings (${buildings.length + (cavern ? 1 : 0)}/${rc.maxSlots})</h4>`;
     const counts: Record<string, number> = {};
     for (const b of buildings) counts[b.type] = (counts[b.type] || 0) + 1;
     for (const [type, count] of Object.entries(counts)) {
       const cfg = BUILDINGS[type as BuildingType];
       html += `<div style="padding:2px 0;font-size:11px">${cfg.icon} ${cfg.name} ×${count}</div>`;
     }
+    if (cavern) {
+      html += `<div style="padding:2px 0;font-size:11px">${BUILDINGS.saltCavern.icon} ${BUILDINGS.saltCavern.name} ×1</div>`;
+    }
     html += '</div>';
+  } else if (cavern) {
+    html += `<div class="info-section"><h4>Buildings (1/${rc.maxSlots})</h4><div style="padding:2px 0;font-size:11px">${BUILDINGS.saltCavern.icon} ${BUILDINGS.saltCavern.name} ×1</div></div>`;
   }
 
   if (customers.length > 0) {
@@ -441,6 +472,13 @@ export function showRegionInfo(regionId: string): void {
   if (quote) html += `<div class="manifesto-quote">${quote}</div>`;
 
   $('#info-content').innerHTML = html;
+  const buildCavernBtn = $maybe<HTMLButtonElement>('#info-build-cavern');
+  if (buildCavernBtn) {
+    buildCavernBtn.addEventListener('click', () => {
+      build('saltCavern', regionId);
+      showRegionInfo(regionId);
+    });
+  }
 }
 
 /** Small HTML helper: render a left-label / right-value row. */

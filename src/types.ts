@@ -8,6 +8,7 @@ export type BuildingType =
   | 'solarPlant'
   | 'windPlant'
   | 'nuclearPlant'
+  | 'saltCavern'
   | 'pipeline';
 export type PlaceableBuildingType = Exclude<BuildingType, 'pipeline'>;
 export type PlantKind = 'solar' | 'wind' | 'nuclear';
@@ -49,10 +50,21 @@ export interface PipelineConfig {
   quote: string;
 }
 
+export interface SaltCavernConfig {
+  name: string;
+  icon: string;
+  baseCost: number;
+  volumeM3: number;
+  storageKg: number;
+  constructionDays: number;
+  quote: string;
+}
+
 export interface BuildingsConfigMap {
   solarPlant: HydrogenPlantConfig;
   windPlant: HydrogenPlantConfig;
   nuclearPlant: HydrogenPlantConfig;
+  saltCavern: SaltCavernConfig;
   pipeline: PipelineConfig;
 }
 
@@ -179,6 +191,15 @@ export interface Pipe {
   builtDay: number;
 }
 
+export interface SaltCavern {
+  regionId: string;
+  storedH2Kg: number;
+  builtDay: number;
+  onlineDay: number;
+  operational: boolean;
+  cost: number;
+}
+
 export interface Customer {
   id: number;
   regionId: string;
@@ -252,6 +273,7 @@ export interface GameState {
   regions: Record<string, RegionState>;
   buildings: Building[];
   pipes: Pipe[];
+  caverns: SaltCavern[];
   customers: Customer[];
   nextBuildingId: number;
   nextPipeId: number;
