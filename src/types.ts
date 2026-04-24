@@ -223,6 +223,21 @@ export interface MilestoneFlags {
   firstCustomer: boolean;
   priceBelow3: boolean;
   tenPipes: boolean;
+  researchBreakthrough: boolean;
+  researchComplete: boolean;
+}
+
+export type ResearchTrackName = 'solar' | 'wind' | 'electrolyzer';
+
+export interface ResearchTrack {
+  /** Integer 0..5. 0 is baseline (no research); 5 is fully researched. */
+  tier: number;
+}
+
+export interface ResearchState {
+  solar: ResearchTrack;
+  wind: ResearchTrack;
+  electrolyzer: ResearchTrack;
 }
 
 /** v4: bankruptcy lose-condition state. */
@@ -283,6 +298,7 @@ export interface GameState {
   insightIndex: number;
   lastInsightDay: number;
   milestones: MilestoneFlags;
+  research: ResearchState;
   lastSavedAt: number;
   version: number;
 }

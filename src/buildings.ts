@@ -1,7 +1,6 @@
 import { playBuild } from './audio';
 import {
   BUILDINGS,
-  ELECTROLYZER_EFFICIENCY,
   KWH_PER_KG_H2,
   NUCLEAR_CYCLE_DAYS,
   NUCLEAR_FLEET_PHASE_OFFSET,
@@ -13,6 +12,7 @@ import {
   getRegionConfig
 } from './config';
 import { distanceBetween, getCenter } from './map';
+import { getCurrentPlantCapex, getElectrolyzerEfficiency } from './research';
 import { state } from './state';
 import { fmtMoney, showToast, updateBuildCosts } from './ui';
 import type {
@@ -24,10 +24,16 @@ import type {
 } from './types';
 
 /**
- * Current effective build cost for a placeable type. Costs are fixed
- * base CAPEX values.
+ * Current effective build cost for a placeable type. Hydrogen Plants
+ * resolve through research (solar/wind/electrolyzer tiers cut generator
+ * and electrolyzer CAPEX independently — nuclear reactor CAPEX is never
+ * reduced). Salt caverns are not researchable; their cost is the static
+ * BUILDINGS.baseCost.
  */
 export function getCost(type: PlaceableBuildingType): number {
+  if (type === 'solarPlant' || type === 'windPlant' || type === 'nuclearPlant') {
+    return Math.round(getCurrentPlantCapex(state, type));
+  }
   return Math.round(BUILDINGS[type].baseCost);
 }
 
@@ -265,15 +271,17 @@ export function getConnectedOperationalCavernCapacityKg(): number {
 
 /**
  * Is a nuclear plant currently in its planned refuelling outage?
- * Each plant has a phase-offset so outages are spread across the fleet
- * (not all reactors offline at once). With 75-day outage in a 270-day
- * cycle → ~27.8% outage ≈ 72.2% availability, matching RTE's published
- * French reactor-fleet CF of ~0.72.
+ * The cycle is anchored to the plant's `builtDay` (so a newly placed
+ * reactor starts productive — not dropped mid-outage), and the outage
+ * falls at the tail of each cycle. Plants are staggered by id so
+ * outages spread across the fleet rather than syncing.
  */
 function nuclearAvailability(b: Building, gameDay: number): number {
+  const daysSinceBuild = Math.max(0, gameDay - b.builtDay);
   const offset = (b.id * NUCLEAR_FLEET_PHASE_OFFSET) % NUCLEAR_CYCLE_DAYS;
-  const cycleDay = (gameDay + offset) % NUCLEAR_CYCLE_DAYS;
-  return cycleDay < NUCLEAR_OUTAGE_DAYS ? 0 : 1;
+  const cycleDay = (daysSinceBuild + offset) % NUCLEAR_CYCLE_DAYS;
+  const operationalDays = NUCLEAR_CYCLE_DAYS - NUCLEAR_OUTAGE_DAYS;
+  return cycleDay < operationalDays ? 1 : 0;
 }
 
 /**
@@ -327,7 +335,7 @@ export function updateProduction(): void {
       const internalMW = nameplate * genFactor;
       b.internalElectricity = internalMW;
 
-      const h2Produced = internalMW * 24 * 1000 * ELECTROLYZER_EFFICIENCY / KWH_PER_KG_H2;
+      const h2Produced = internalMW * 24 * 1000 * getElectrolyzerEfficiency(s) / KWH_PER_KG_H2;
 
       b.production = h2Produced;
       rs.supply += h2Produced;
@@ -360,10 +368,21 @@ function dailyOpexFractionFor(type: PlaceableBuildingType): number {
  * Sum of daily opex across every live plant. Pipeline maintenance is
  * treated as publicly funded backbone upkeep, so it does not hit the
  * player's operating budget.
+ *
+ * Retroactive OPEX: each plant's daily opex uses the CAPEX it WOULD cost
+ * to build today (research-adjusted), not the sunk `b.cost`. Research
+ * tier purchases therefore lower OPEX on plants the player already owns,
+ * without refunding the original CAPEX. Salt caverns fall back to the
+ * stored `b.cost` since their opex fraction is 0 anyway.
  */
 export function computeDailyOpex(): number {
   let opex = 0;
-  for (const b of state.buildings) opex += b.cost * dailyOpexFractionFor(b.type);
+  for (const b of state.buildings) {
+    const capexBasis = b.type === 'saltCavern'
+      ? b.cost
+      : getCurrentPlantCapex(state, b.type);
+    opex += capexBasis * dailyOpexFractionFor(b.type);
+  }
   return opex;
 }
 

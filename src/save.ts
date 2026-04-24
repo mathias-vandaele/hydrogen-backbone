@@ -125,11 +125,19 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!Array.isArray(merged.budgetHistory)) merged.budgetHistory = [];
   if (!Array.isArray(merged.caverns)) merged.caverns = [];
   if (!merged.milestones) merged.milestones = { ...fresh.milestones };
+  for (const key of Object.keys(fresh.milestones)) {
+    const milestone = key as keyof typeof fresh.milestones;
+    if (typeof merged.milestones[milestone] !== 'boolean') merged.milestones[milestone] = fresh.milestones[milestone];
+  }
   if (!merged.thresholdCrossings) merged.thresholdCrossings = { ...fresh.thresholdCrossings };
   for (const key of Object.keys(fresh.thresholdCrossings)) {
     const type = key as keyof typeof fresh.thresholdCrossings;
     if (!(type in merged.thresholdCrossings)) merged.thresholdCrossings[type] = fresh.thresholdCrossings[type];
   }
+  if (!merged.research) merged.research = { ...fresh.research };
+  if (typeof merged.research.solar?.tier !== 'number') merged.research.solar = { ...fresh.research.solar };
+  if (typeof merged.research.wind?.tier !== 'number') merged.research.wind = { ...fresh.research.wind };
+  if (typeof merged.research.electrolyzer?.tier !== 'number') merged.research.electrolyzer = { ...fresh.research.electrolyzer };
   if (typeof merged.lastSavedAt !== 'number') merged.lastSavedAt = 0;
   if (typeof merged.dailyRevenue !== 'number') merged.dailyRevenue = 0;
   if (typeof merged.dailyOpex !== 'number') merged.dailyOpex = 0;

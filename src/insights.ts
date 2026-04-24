@@ -6,6 +6,7 @@
 // a minimum-day floor AND a volume floor so short-term spikes can't
 // trigger a pop-up.
 
+import { MAX_RESEARCH_TIER } from './research';
 import { state } from './state';
 import { showManifesto } from './ui';
 import type { Insight } from './types';
@@ -54,6 +55,33 @@ const MILESTONES: Milestone[] = [
     insight: {
       title: 'The Backbone Is Emerging',
       text: 'Ten pipes. A topology is forming. Line-pack alone now stores gigawatt-hours of buffer capacity. The network becomes more than the sum of its links: pressure routes around failures, markets clear locally, permissionless injection finds permissionless withdrawal. This is the protocol layer. Build more pipe.'
+    }
+  },
+  {
+    // Fires the first time any research track crosses tier 3 — the point
+    // where the learning-curve argument becomes concrete on the player's
+    // balance sheet (30% CAPEX cut on that track's plants).
+    key: 'researchBreakthrough',
+    check: () =>
+      state.research.solar.tier >= 3 ||
+      state.research.wind.tier >= 3 ||
+      state.research.electrolyzer.tier >= 3,
+    insight: {
+      title: "Wright's Law",
+      text: "Wright's Law is the most reliable empirical law in industrial economics. Every doubling of cumulative production reduces unit cost by a fixed percentage — it drove solar from $76/W in 1977 to $0.20/W today. Your investments are pulling the same lever."
+    }
+  },
+  {
+    // Fires when every track is maxed — the research arc is complete and
+    // the price envelope has contracted to its 1.0–4.0 €/kg target.
+    key: 'researchComplete',
+    check: () =>
+      state.research.solar.tier >= MAX_RESEARCH_TIER &&
+      state.research.wind.tier >= MAX_RESEARCH_TIER &&
+      state.research.electrolyzer.tier >= MAX_RESEARCH_TIER,
+    insight: {
+      title: 'The Curve Bends',
+      text: 'You have demonstrated what the manifesto argues: aggressive investment in the learning curve drives clean tech below fossil parity. The backbone is no longer an expensive experiment — it is the cheapest energy architecture available.'
     }
   }
 ];

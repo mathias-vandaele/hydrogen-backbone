@@ -5,6 +5,7 @@
 // that extrapolates 120 days from recent price momentum.
 
 import { CUSTOMER_TYPES, ECONOMY } from './config';
+import { getCurrentPriceBand } from './research';
 import { state } from './state';
 import type { CustomerType } from './types';
 
@@ -140,10 +141,13 @@ export function drawPriceChart(
   const history = state.priceHistory.slice(-sampleWindow);
   if (history.length < 2) { ctx.restore(); return; }
 
-  // Price Y-range: clamp to [1, 8] so thresholds have stable positions.
-  const lo = 1.0;
-  const hi = Math.max(8.0, ...history);
-  const range = hi - lo;
+  // Price Y-range tracks the research-contracted price band so the chart
+  // visibly compresses as the player invests in research. `hi` still
+  // expands to include any history excursion above the band ceiling.
+  const band = getCurrentPriceBand(state);
+  const lo = band.min;
+  const hi = Math.max(band.max, ...history);
+  const range = Math.max(0.01, hi - lo);
   const toY = (v: number) => innerY + innerH - ((v - lo) / range) * innerH;
   // X spans: first 0..sampleWindow-1 live history, then projectionDays ahead.
   const totalSlots = history.length - 1 + projectionDays;

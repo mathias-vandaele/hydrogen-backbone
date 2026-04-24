@@ -68,7 +68,14 @@ export function createInitialState(): GameState {
     milestones: {
       firstCustomer: false,
       priceBelow3: false,
-      tenPipes: false
+      tenPipes: false,
+      researchBreakthrough: false,
+      researchComplete: false
+    },
+    research: {
+      solar: { tier: 0 },
+      wind: { tier: 0 },
+      electrolyzer: { tier: 0 }
     },
     lastSavedAt: 0,
     version: 5

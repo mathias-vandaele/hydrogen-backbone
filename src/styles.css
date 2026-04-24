@@ -161,6 +161,94 @@ html, body {
   max-height: calc(100vh - 120px);
   overflow-y: auto;
 }
+#research-panel {
+  position: absolute;
+  top: 58px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, calc(100vw - 24px));
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 20;
+  backdrop-filter: blur(8px);
+  display: none;
+  padding-bottom: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+#research-panel h3 {
+  padding: 10px 14px 8px;
+  color: var(--cyan);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  border-bottom: 1px solid var(--border);
+}
+#research-summary {
+  padding: 10px 14px 4px;
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.5;
+}
+#research-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 8px 14px 0;
+}
+.research-card {
+  background: rgba(17, 24, 39, 0.9);
+  border: 1px solid rgba(30, 58, 95, 0.8);
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.research-card h4 {
+  color: var(--text);
+  font-size: 12px;
+}
+.research-tier {
+  color: var(--cyan);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.research-line {
+  color: var(--text2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.research-line strong {
+  color: var(--text);
+  font-weight: bold;
+}
+.research-buy {
+  margin-top: auto;
+  background: var(--bg);
+  border: 1px solid var(--cyan);
+  color: var(--cyan);
+  padding: 8px 10px;
+  font-family: var(--font);
+  font-size: 11px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.research-buy:hover {
+  background: rgba(6, 214, 160, 0.08);
+  box-shadow: var(--glow);
+}
+.research-buy:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.research-maxed {
+  color: var(--green);
+  font-size: 11px;
+  margin-top: auto;
+}
 #info-panel h3 {
   padding: 10px 12px 6px;
   color: var(--cyan);
@@ -505,6 +593,18 @@ html, body {
 #save-menu button:hover {
   border-color: var(--cyan);
   color: var(--cyan);
+}
+
+@media (max-width: 1100px) {
+  #research-panel {
+    left: auto;
+    right: 10px;
+    transform: none;
+    width: min(480px, calc(100vw - 20px));
+  }
+  #research-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Scrollbar */

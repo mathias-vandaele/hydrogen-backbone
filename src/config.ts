@@ -39,14 +39,27 @@ export const MAP_PADDING = 60;
 // ═══════════════════════════════════════════════════════════════════════
 
 // CAPEX per bundled plant. Each Hydrogen Plant bundles a generator with
-// a matched-capacity electrolyzer stack (1:1). Breakdown:
+// a matched-capacity electrolyzer stack (1:1). Components are split out
+// because research (see `src/research.ts`) targets generator CAPEX and
+// electrolyzer CAPEX independently — solar/wind research only rebates the
+// generator side; electrolyzer research rebates every plant's electrolyzer
+// side (including nuclear's). Nuclear reactor CAPEX is fixed — nuclear is
+// mature tech, not on a Wright's Law curve.
 //   Solar:   100 MW PV @ €800/kW (IRENA 2023)      + 100 MW electrolyzer @ €1.8M/MW
 //   Wind:    100 MW onshore @ €1.4M/MW (IEA WEO24) + 100 MW electrolyzer @ €1.8M/MW
 //   Nuclear: 300 MW SMR @ €7M/MW (EDF/Nuward est.) + 300 MW electrolyzer @ €1.8M/MW
 export const CAPEX = {
-  SOLAR_HYDROGEN_PLANT: 260_000_000,    // €260M
-  WIND_HYDROGEN_PLANT: 320_000_000,     // €320M
-  NUCLEAR_HYDROGEN_PLANT: 2_640_000_000 // €2.64B
+  SOLAR_GENERATOR:      80_000_000,    // €80M  — 100 MW PV
+  SOLAR_ELECTROLYZER:   180_000_000,   // €180M — 100 MW stack
+  WIND_GENERATOR:       140_000_000,   // €140M — 100 MW onshore
+  WIND_ELECTROLYZER:    180_000_000,   // €180M — 100 MW stack
+  NUCLEAR_REACTOR:      2_100_000_000, // €2.1B — 300 MW SMR
+  NUCLEAR_ELECTROLYZER: 540_000_000,   // €540M — 300 MW stack
+  // Aggregate baseline totals (used as BUILDINGS.baseCost defaults; the
+  // actual build cost resolves through getCurrentPlantCapex in research.ts).
+  SOLAR_HYDROGEN_PLANT:   260_000_000,   // €260M
+  WIND_HYDROGEN_PLANT:    320_000_000,   // €320M
+  NUCLEAR_HYDROGEN_PLANT: 2_640_000_000  // €2.64B
 };
 
 // Nameplate generator capacity (peak MW under ideal conditions).

@@ -4,11 +4,10 @@ import {
   MAX_PRESSURE,
   MIN_PRESSURE,
   PRESSURE_PRICE_CURVE,
-  PRESSURE_PRICE_MAX,
-  PRESSURE_PRICE_MIN,
   REGIONS,
   TICKS_PER_DAY
 } from './config';
+import { getCurrentPriceBand } from './research';
 import type { GameState } from './types';
 import { state } from './state';
 
@@ -48,7 +47,9 @@ export function updateEcon(): void {
   }
 
   // Simple pressure-price model: fuller pipe = cheaper hydrogen.
-  s.spotPrice = priceFromPressure(s.networkPressure);
+  // Research tiers contract the band (see getCurrentPriceBand).
+  const band = getCurrentPriceBand(s);
+  s.spotPrice = priceFromPressure(s.networkPressure, band);
 
   // Connected regions share one network pressure, so they also share one
   // network-clearing price. Disconnected regions stay at the scarcity cap.
@@ -56,8 +57,8 @@ export function updateEcon(): void {
     const rs = s.regions[rc.id];
     rs.localPrice = rs.pipeConnections > 0
       ? s.spotPrice
-      : PRESSURE_PRICE_MAX;
-    rs.localPrice = Math.max(PRESSURE_PRICE_MIN, Math.min(PRESSURE_PRICE_MAX, rs.localPrice));
+      : band.max;
+    rs.localPrice = Math.max(band.min, Math.min(band.max, rs.localPrice));
   }
 
   let networkSupply = 0;
@@ -107,13 +108,13 @@ export function updateEcon(): void {
   }
 }
 
-function priceFromPressure(pressure: number): number {
+function priceFromPressure(pressure: number, band: { min: number; max: number }): number {
   const clamped = Math.max(MIN_PRESSURE, Math.min(MAX_PRESSURE, pressure));
   const minNorm = sigmoid(-PRESSURE_PRICE_CURVE / 2);
   const maxNorm = sigmoid(PRESSURE_PRICE_CURVE / 2);
   const x = ((clamped - MIN_PRESSURE) / Math.max(1, MAX_PRESSURE - MIN_PRESSURE) - 0.5) * PRESSURE_PRICE_CURVE;
   const curved = (sigmoid(x) - minNorm) / Math.max(1e-6, maxNorm - minNorm);
-  return PRESSURE_PRICE_MAX - curved * (PRESSURE_PRICE_MAX - PRESSURE_PRICE_MIN);
+  return band.max - curved * (band.max - band.min);
 }
 
 function demandFromPrice(price: number, demandMin: number, demandMax: number, threshold: number): number {

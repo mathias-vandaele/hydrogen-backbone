@@ -17,6 +17,7 @@
     <div class="hud-item"><span class="hud-label">Customers</span><span class="hud-value" id="hud-customers">0</span></div>
     <div class="hud-item"><span class="hud-label">Date</span><span class="hud-value" id="hud-day">Jan 1, 2025</span></div>
     <div class="hud-item"><span class="hud-label">Season</span><span class="hud-value" id="hud-season">Spring</span></div>
+    <div class="hud-item" id="research-toggle" title="Research" style="cursor:pointer"><span class="hud-label">🧪</span><span class="hud-value">Research</span></div>
     <div class="hud-item" id="save-toggle" title="Save/Load" style="cursor:pointer"><span class="hud-label">💾</span></div>
     <div class="hud-item" id="sound-toggle" title="Sound" style="cursor:pointer"><span class="hud-label" id="sound-icon">🔊</span></div>
     <div id="speed-controls">
@@ -56,6 +57,12 @@
     <div id="info-content"></div>
   </div>
 
+  <div id="research-panel">
+    <h3>🧪 Research</h3>
+    <div id="research-summary"></div>
+    <div id="research-cards"></div>
+  </div>
+
   <div id="region-tooltip"></div>
   <div id="build-tooltip"></div>
 
@@ -71,6 +78,7 @@
       <div class="stat">Net: <span class="stat-val" id="stat-net">€0/day</span></div>
     </div>
     <div class="status-group status-network">
+      <div class="stat">Price Band: <span class="stat-val" id="stat-price-band">€2.0 – €8.0/kg</span></div>
       <div class="stat">Supply/Demand Ratio: <span class="stat-val" id="stat-supply-ratio">0.00</span></div>
       <div class="stat">Storage Capacity: <span class="stat-val" id="stat-storage-capacity">0kg</span></div>
       <div class="stat">Customers: <span class="stat-val" id="stat-customers">Small 0/24 · Mid 0/12 · Big 0/6</span></div>

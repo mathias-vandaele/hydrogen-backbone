@@ -24,9 +24,17 @@ import {
 import { input } from './input';
 import { mapView } from './map';
 import { getNetworkStorageCapacityKg } from './pressure';
+import {
+  buyResearchTier,
+  getCurrentPriceBand,
+  getElectrolyzerEfficiency,
+  getNextTierCost,
+  getTotalResearchTiers,
+  MAX_RESEARCH_TIER
+} from './research';
 import { createInitialState, replaceState, state } from './state';
 import { getSeason, getWeatherAt } from './weather';
-import type { BuildingType, Insight } from './types';
+import type { BuildingType, Insight, ResearchTrackName } from './types';
 
 /**
  * v4 Runway: how many days of operation remain at the current burn rate.
@@ -48,6 +56,7 @@ let toastTimer: number | undefined;
  */
 export function initUI(): void {
   updateBuildCosts();
+  updateResearchPanel();
 
   // Wire up build buttons (replaces inline onclick handlers).
   $$<HTMLButtonElement>('.build-btn').forEach(btn => {
@@ -59,6 +68,19 @@ export function initUI(): void {
   });
 
   $('#manifesto-close').addEventListener('click', closeManifesto);
+  const researchToggle = $maybe('#research-toggle');
+  if (researchToggle) researchToggle.addEventListener('click', toggleResearchPanel);
+  const researchCards = $maybe('#research-cards');
+  if (researchCards) {
+    researchCards.addEventListener('click', ev => {
+      const target = ev.target as HTMLElement | null;
+      const btn = target?.closest<HTMLButtonElement>('[data-research-track]');
+      if (!btn) return;
+      const track = btn.dataset.researchTrack as ResearchTrackName | undefined;
+      if (!track) return;
+      investInResearch(track);
+    });
+  }
 
   const hudMoney = $('#hud-money');
   hudMoney.addEventListener('click', () => {/* placeholder for future money breakdown */});
@@ -115,6 +137,7 @@ function hideBuildQuote(): void {
  */
 export function updateHUD(): void {
   const s = state;
+  updateResearchPanel();
 
   // Budget now shown as signed — can go negative in v4. `warn` below €30M,
   // `danger` when negative.
@@ -164,6 +187,10 @@ export function updateHUD(): void {
 
   // Network group.
   const ratio = avgDemand > 0 ? avgSupply / avgDemand : (avgSupply > 0 ? Infinity : 0);
+  const priceBand = getCurrentPriceBand(s);
+  const totalResearchTiers = getTotalResearchTiers(s);
+  const priceBandEl = $('#stat-price-band');
+  priceBandEl.textContent = `€${priceBand.min.toFixed(1)} – €${priceBand.max.toFixed(1)}/kg (${totalResearchTiers}/15 tiers)`;
   const ratioEl = $('#stat-supply-ratio');
   const ratioText = Number.isFinite(ratio) ? ratio.toFixed(2) : '∞';
   const tierSummary = getTierPopulationSummary();
@@ -531,6 +558,87 @@ export function toggleSaveMenu(): void {
   const m = $('#save-menu');
   m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
   updateSaveTimestamp();
+}
+
+export function toggleResearchPanel(): void {
+  const panel = $('#research-panel');
+  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+  if (panel.style.display === 'block') updateResearchPanel();
+}
+
+function investInResearch(track: ResearchTrackName): void {
+  const nextCost = getNextTierCost(state, track);
+  if (nextCost === null) {
+    showToast('Research already complete.');
+    return;
+  }
+  if (!buyResearchTier(state, track)) {
+    showToast(`Need €${fmtMoney(nextCost)} for the next ${labelResearchTrack(track)} tier.`);
+    return;
+  }
+  updateBuildCosts();
+  updateResearchPanel();
+  playClick();
+  showToast(`${labelResearchTrack(track)} research advanced to tier ${state.research[track].tier}.`);
+}
+
+function updateResearchPanel(): void {
+  const summary = $maybe('#research-summary');
+  const cards = $maybe('#research-cards');
+  if (!summary || !cards) return;
+  const band = getCurrentPriceBand(state);
+  const tiers = getTotalResearchTiers(state);
+  summary.innerHTML =
+    `Wright-style learning cuts new plant CAPEX and compresses the market price band.` +
+    `<br>Current band: <strong>€${band.min.toFixed(1)} – €${band.max.toFixed(1)}/kg</strong> · Research progress: <strong>${tiers}/15 tiers</strong>.`;
+  const tracks: ResearchTrackName[] = ['solar', 'wind', 'electrolyzer'];
+  cards.innerHTML = tracks.map(renderResearchCard).join('');
+}
+
+function renderResearchCard(track: ResearchTrackName): string {
+  const tier = state.research[track].tier;
+  const nextCost = getNextTierCost(state, track);
+  const maxed = tier >= MAX_RESEARCH_TIER;
+  const affordable = nextCost !== null && state.money >= nextCost;
+  const lines = getResearchCardLines(track, tier);
+  const action = maxed
+    ? `<div class="research-maxed">Research complete</div>`
+    : `<button class="research-buy" data-research-track="${track}"${affordable ? '' : ' disabled'}>${affordable ? 'Invest' : 'Insufficient budget'} · €${fmtMoney(nextCost ?? 0)}</button>`;
+  return `<div class="research-card">
+    <h4>${labelResearchTrack(track)} Research</h4>
+    <div class="research-tier">Tier ${tier} of ${MAX_RESEARCH_TIER}</div>
+    <div class="research-line"><strong>Current:</strong> ${lines.current}</div>
+    <div class="research-line"><strong>Next:</strong> ${lines.next}</div>
+    ${action}
+  </div>`;
+}
+
+function getResearchCardLines(track: ResearchTrackName, tier: number): { current: string; next: string } {
+  if (track === 'solar') {
+    const current = tier === 0 ? 'baseline solar generator CAPEX' : `-${tier * 10}% solar generator CAPEX`;
+    const next = tier >= MAX_RESEARCH_TIER ? 'maxed' : `-${(tier + 1) * 10}% solar generator CAPEX`;
+    return { current, next };
+  }
+  if (track === 'wind') {
+    const current = tier === 0 ? 'baseline wind generator CAPEX' : `-${tier * 10}% wind generator CAPEX`;
+    const next = tier >= MAX_RESEARCH_TIER ? 'maxed' : `-${(tier + 1) * 10}% wind generator CAPEX`;
+    return { current, next };
+  }
+  const current = tier === 0
+    ? `baseline electrolyzer CAPEX · ${(getElectrolyzerEfficiency(state) * 100).toFixed(0)}% efficiency`
+    : `-${tier * 10}% electrolyzer CAPEX · ${(getElectrolyzerEfficiency(state) * 100).toFixed(0)}% efficiency`;
+  const next = tier >= MAX_RESEARCH_TIER
+    ? 'maxed'
+    : `-${(tier + 1) * 10}% electrolyzer CAPEX · ${(75 + tier * 5).toFixed(0)}% efficiency`;
+  return { current, next };
+}
+
+function labelResearchTrack(track: ResearchTrackName): string {
+  switch (track) {
+    case 'solar': return 'Solar';
+    case 'wind': return 'Wind';
+    case 'electrolyzer': return 'Electrolyzer';
+  }
 }
 
 /**
