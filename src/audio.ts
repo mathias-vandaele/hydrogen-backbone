@@ -1,4 +1,5 @@
 import { $ } from './dom';
+import { setDomIcon } from './icons';
 
 interface AudioState {
   ctx: AudioContext | null;
@@ -49,9 +50,9 @@ export function initAudio(): void {
  */
 export function toggleAudio(): void {
   audio.enabled = !audio.enabled;
-  $('#sound-icon').textContent = audio.enabled ? '🔊' : '🔇';
+  setDomIcon($('#sound-icon'), audio.enabled ? 'soundOn' : 'soundOff');
   if (audio.ambientGain && audio.ctx) {
-    const target = audio.enabled ? 0.012 : 0.0;
+    const target = audio.enabled ? 0.009 : 0.0;
     audio.ambientGain.gain.linearRampToValueAtTime(target, audio.ctx.currentTime + 0.25);
   }
 }
@@ -59,29 +60,28 @@ export function toggleAudio(): void {
 // ─── Ambient hum (starts on first click, runs while enabled) ─────────────
 
 /**
- * Start the continuous ambient background hum: two sine oscillators at
- * ~55 Hz detuned by 0.6 Hz, through a gentle low-pass, at near-inaudible
- * level. Idempotent — subsequent calls are ignored once started.
+ * Start the continuous ambient room tone: two low oscillators around
+ * 40 Hz, detuned just enough to feel like old electrical equipment in a
+ * real control room. Idempotent — subsequent calls are ignored once started.
  */
 function startAmbient(): void {
   if (!audio.ctx || audio.ambientStarted) return;
   const ctx = audio.ctx;
   try {
-    // Two detuned sines + a gentle low-pass for warmth, at near-inaudible level
     const gain = ctx.createGain();
     gain.gain.value = 0.0;
     gain.connect(ctx.destination);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass';
-    lp.frequency.value = 320;
-    lp.Q.value = 0.5;
+    lp.frequency.value = 180;
+    lp.Q.value = 0.7;
     lp.connect(gain);
-    const a = ctx.createOscillator(); a.type = 'sine'; a.frequency.value = 55;
-    const b = ctx.createOscillator(); b.type = 'sine'; b.frequency.value = 55.6;
+    const a = ctx.createOscillator(); a.type = 'sine'; a.frequency.value = 41;
+    const b = ctx.createOscillator(); b.type = 'triangle'; b.frequency.value = 41.7;
     a.connect(lp); b.connect(lp);
     a.start(); b.start();
     // Ramp up slowly so it doesn't click
-    gain.gain.linearRampToValueAtTime(audio.enabled ? 0.012 : 0, ctx.currentTime + 1.2);
+    gain.gain.linearRampToValueAtTime(audio.enabled ? 0.009 : 0, ctx.currentTime + 1.2);
     audio.ambientGain = gain;
     audio.ambientStarted = true;
   } catch {
@@ -90,9 +90,8 @@ function startAmbient(): void {
 }
 
 /**
- * Low-level one-shot oscillator playback. All named sfx helpers below are
- * thin wrappers around this — they pick a waveform, pitch sweep, duration
- * and volume. Silently no-ops if sound is muted or the context isn't up.
+ * Low-level one-shot oscillator playback. The oscillator is filtered so
+ * even synthetic tones arrive as warm relays and metalwork, not arcade UI.
  */
 function play(type: OscillatorType, freq: number, freqEnd: number | null, dur: number, vol: number): void {
   if (!audio.enabled || !audio.ctx) return;
@@ -103,9 +102,13 @@ function play(type: OscillatorType, freq: number, freqEnd: number | null, dur: n
     o.type = type;
     o.frequency.setValueAtTime(freq, ctx.currentTime);
     if (freqEnd !== null) o.frequency.exponentialRampToValueAtTime(freqEnd, ctx.currentTime + dur * 0.7);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2200;
+    lp.Q.value = 0.6;
     g.gain.setValueAtTime(vol, ctx.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
-    o.connect(g).connect(ctx.destination);
+    o.connect(lp).connect(g).connect(ctx.destination);
     o.start();
     o.stop(ctx.currentTime + dur);
   } catch {
@@ -113,16 +116,78 @@ function play(type: OscillatorType, freq: number, freqEnd: number | null, dur: n
   }
 }
 
-/** UI click sfx (build-btn selection, tutorial advance). */
-export function playClick(): void { play('sine', 800, 1200, 0.08, 0.1); }
+function playNoiseBurst(dur: number, vol: number, filterFreq: number, delay = 0): void {
+  if (!audio.enabled || !audio.ctx) return;
+  try {
+    const ctx = audio.ctx;
+    const samples = Math.max(1, Math.floor(ctx.sampleRate * dur));
+    const buffer = ctx.createBuffer(1, samples, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < samples; i++) {
+      const decay = 1 - i / samples;
+      data[i] = (Math.random() * 2 - 1) * decay * decay;
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = filterFreq;
+    bp.Q.value = 4;
+    const g = ctx.createGain();
+    const t = ctx.currentTime + delay;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.004);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    src.connect(bp).connect(g).connect(ctx.destination);
+    src.start(t);
+  } catch {
+    // Ignore transient audio errors.
+  }
+}
+
+function playBell(freq: number, delay = 0, vol = 0.08, dur = 0.42): void {
+  if (!audio.enabled || !audio.ctx) return;
+  try {
+    const ctx = audio.ctx;
+    const t = ctx.currentTime + delay;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 2600;
+    lp.Q.value = 0.7;
+    lp.connect(g).connect(ctx.destination);
+    for (const [multiple, gain] of [[1, 1], [2.01, 0.34], [2.98, 0.18]] as const) {
+      const o = ctx.createOscillator();
+      const og = ctx.createGain();
+      o.type = multiple === 1 ? 'triangle' : 'sine';
+      o.frequency.setValueAtTime(freq * multiple, t);
+      og.gain.value = gain;
+      o.connect(og).connect(lp);
+      o.start(t);
+      o.stop(t + dur);
+    }
+  } catch {
+    // Ignore transient audio errors.
+  }
+}
+
+/** UI click sfx: a short mechanical switch, not a digital beep. */
+export function playClick(): void {
+  playNoiseBurst(0.026, 0.12, 1800);
+  play('square', 150, 92, 0.045, 0.026);
+}
 
 /**
  * Solar/wind/nuclear/pipe build sfx. Two-note rising triangle→sine so it
  * reads as "construction complete" rather than a click.
  */
 export function playBuild(): void {
-  play('triangle', 300, 800, 0.15, 0.15);
-  setTimeout(() => play('sine', 600, 1200, 0.1, 0.1), 100);
+  playClick();
+  setTimeout(() => play('triangle', 180, 108, 0.12, 0.08), 58);
+  setTimeout(() => playNoiseBurst(0.045, 0.08, 900), 82);
 }
 
 /**
@@ -130,46 +195,30 @@ export function playBuild(): void {
  * customer via customers.ts; paired with a region-flash overlay.
  */
 export function playCustomer(): void {
-  play('sine', 523, 659, 0.12, 0.12);
-  setTimeout(() => play('sine', 659, 784, 0.12, 0.1), 120);
-  setTimeout(() => play('sine', 784, 1047, 0.15, 0.1), 240);
+  playBell(392, 0, 0.08, 0.46);
+  playBell(523, 0.11, 0.055, 0.5);
 }
 
-/** High-pitched ding reserved for cash-milestone events. */
-export function playMoney(): void { play('sine', 2000, 2500, 0.06, 0.08); }
+/** Ledger tick reserved for cash-milestone events. */
+export function playMoney(): void {
+  playNoiseBurst(0.018, 0.08, 2200);
+  play('triangle', 620, 520, 0.06, 0.035);
+}
 
-/** Low urgent square for warning states (currently unused but ready). */
-export function playWarning(): void { play('square', 200, 100, 0.3, 0.08); }
+/** Low urgent relay buzz for warning states (currently unused but ready). */
+export function playWarning(): void {
+  play('square', 120, 70, 0.22, 0.055);
+  setTimeout(() => playNoiseBurst(0.06, 0.05, 300), 30);
+}
 
 /**
- * Short airy sweep played when the network's average pressure crosses a
- * threshold (25/50/70 bar rising edge) — gives the player auditory
- * feedback that the backbone is building up.
+ * Soft pressure pulse played when average pressure crosses a band
+ * (25/50/70 bar rising edge). This is an acknowledgment thump, not an
+ * alarm or whoosh.
  */
 export function playWhoosh(): void {
-  if (!audio.enabled || !audio.ctx) return;
-  try {
-    const ctx = audio.ctx;
-    // Noise-like sweep: sawtooth through a band-pass sweeping upward.
-    const o = ctx.createOscillator();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(60, ctx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(140, ctx.currentTime + 0.4);
-    const bp = ctx.createBiquadFilter();
-    bp.type = 'bandpass';
-    bp.frequency.setValueAtTime(400, ctx.currentTime);
-    bp.frequency.exponentialRampToValueAtTime(1800, ctx.currentTime + 0.4);
-    bp.Q.value = 2.5;
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0, ctx.currentTime);
-    g.gain.linearRampToValueAtTime(0.06, ctx.currentTime + 0.05);
-    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.5);
-    o.connect(bp).connect(g).connect(ctx.destination);
-    o.start();
-    o.stop(ctx.currentTime + 0.55);
-  } catch {
-    // Ignore transient errors.
-  }
+  play('triangle', 118, 74, 0.26, 0.055);
+  playNoiseBurst(0.08, 0.035, 260);
 }
 
 /**
@@ -178,20 +227,33 @@ export function playWhoosh(): void {
  * electrolyzer is placed.
  */
 export function playBubble(): void {
-  play('sine', 400, 700, 0.08, 0.08);
-  setTimeout(() => play('sine', 600, 900, 0.07, 0.06), 90);
-  setTimeout(() => play('sine', 800, 1200, 0.06, 0.05), 180);
+  playClick();
+  setTimeout(() => playClick(), 80);
+  setTimeout(() => play('triangle', 360, 420, 0.08, 0.04), 155);
 }
 
 /**
- * Cha-ching — bright two-note celebration played when a new customer
- * emerges. Complements (does not replace) the existing playCustomer
- * arpeggio by emphasising the *revenue* side of the event, so the
- * player feels financial relief distinct from the "new thing on map".
+ * Contract latch: a small secondary mechanical confirmation when a new
+ * customer appears. It replaces the old "cash register" idea with
+ * something more like a stamped order crossing a desk.
  */
 export function playChaChing(): void {
-  play('triangle', 1200, 1600, 0.08, 0.10);
-  setTimeout(() => play('sine', 1800, 2400, 0.10, 0.08), 70);
+  setTimeout(() => playNoiseBurst(0.028, 0.1, 1600), 210);
+  setTimeout(() => play('square', 190, 130, 0.06, 0.04), 230);
+}
+
+/** Three-tone ascending mechanical chime for research completion/advance. */
+export function playResearchComplete(): void {
+  playBell(330, 0, 0.055, 0.34);
+  playBell(392, 0.12, 0.055, 0.36);
+  playBell(494, 0.24, 0.06, 0.42);
+}
+
+/** Deeper sustained chord reserved for the endgame cinematic. */
+export function playEscapeVelocity(): void {
+  playBell(98, 0, 0.09, 1.8);
+  playBell(147, 0.08, 0.07, 1.9);
+  playBell(196, 0.16, 0.055, 2.0);
 }
 
 /** Muted, slightly-detuned "thud" — one beat of the bankruptcy heartbeat. */

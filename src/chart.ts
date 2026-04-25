@@ -5,6 +5,8 @@
 // that extrapolates 120 days from recent price momentum.
 
 import { CUSTOMER_TYPES, ECONOMY } from './config';
+import { COLOR, canvasFont, withAlpha } from './design-system';
+import { drawIcon } from './icons';
 import { getCurrentPriceBand } from './research';
 import { state } from './state';
 import type { CustomerType } from './types';
@@ -36,9 +38,9 @@ export function drawAreaChart(
 ): void {
   ctx.save();
 
-  ctx.fillStyle = 'rgba(10,14,23,0.75)';
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_DEEP, 0.75);
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = 'rgba(30,58,95,0.5)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.5);
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, w, h);
 
@@ -47,7 +49,7 @@ export function drawAreaChart(
   const innerW = w - 12;
   const innerH = h - 18;
 
-  ctx.strokeStyle = 'rgba(30,58,95,0.25)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.25);
   ctx.setLineDash([2, 3]);
   for (let i = 1; i < 3; i++) {
     const gy = innerY + (innerH * i) / 3;
@@ -83,7 +85,7 @@ export function drawAreaChart(
     ctx.stroke();
   }
 
-  ctx.font = '9px Courier New';
+  ctx.font = canvasFont('9px', 'mono');
   ctx.textBaseline = 'middle';
   let labelX = x + 6;
   const labelY = y + h - 8;
@@ -127,9 +129,9 @@ export function drawPriceChart(
   projectionDays = 120
 ): void {
   ctx.save();
-  ctx.fillStyle = 'rgba(10,14,23,0.80)';
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_DEEP, 0.8);
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = 'rgba(30,58,95,0.5)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.5);
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, w, h);
 
@@ -162,7 +164,7 @@ export function drawPriceChart(
   for (let i = 0; i < history.length; i++) ctx.lineTo(toX(i), toY(history[i]));
   ctx.lineTo(toX(history.length - 1), innerY + innerH);
   ctx.closePath();
-  ctx.fillStyle = 'rgba(6, 214, 160, 0.18)';
+  ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.18);
   ctx.fill();
 
   // Stroke history line
@@ -171,7 +173,7 @@ export function drawPriceChart(
     if (i === 0) ctx.moveTo(toX(i), toY(history[i]));
     else ctx.lineTo(toX(i), toY(history[i]));
   }
-  ctx.strokeStyle = 'rgba(6, 214, 160, 0.95)';
+  ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.95);
   ctx.lineWidth = 1.6;
   ctx.stroke();
 
@@ -183,15 +185,15 @@ export function drawPriceChart(
   drawCustomerMarkers(ctx, history, sampleWindow, toX, toY);
 
   // Legend
-  ctx.font = '9px Courier New';
-  ctx.fillStyle = 'rgba(100,116,139,0.8)';
+  ctx.font = canvasFont('9px', 'mono');
+  ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.8);
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
   const last = history[history.length - 1];
-  ctx.fillText(`H₂ €${last.toFixed(2)}/kg · ${projectionDays}d forecast`, x + 6, y + h - 9);
+  ctx.fillText(`H₂ € ${last.toFixed(2)}/kg · ${projectionDays}d forecast`, x + 6, y + h - 9);
 
   // Right-edge "today" tick
-  ctx.strokeStyle = 'rgba(224,231,255,0.3)';
+  ctx.strokeStyle = withAlpha(COLOR.TYPE_PRIMARY, 0.3);
   ctx.beginPath();
   ctx.moveTo(toX(history.length - 1), innerY);
   ctx.lineTo(toX(history.length - 1), innerY + innerH);
@@ -213,7 +215,7 @@ function drawThresholdLines(
 ): void {
   const now = performance.now();
   ctx.save();
-  ctx.font = '9px Courier New';
+  ctx.font = canvasFont('9px', 'mono');
   ctx.textBaseline = 'middle';
 
   for (const [type, cfg] of Object.entries(CUSTOMER_TYPES)) {
@@ -228,9 +230,9 @@ function drawThresholdLines(
     // Highlighted stops
     const isExport = cfg.archetype === 'export' && cfg.tier === 'big';
 
-    let stroke = 'rgba(6,214,160,0.28)';
-    if (isExport) stroke = 'rgba(6,214,160,0.55)';
-    if (flashT > 0) stroke = `rgba(255,255,255,${0.3 + 0.6 * flashT})`;
+    let stroke = withAlpha(COLOR.AMBER_BASE, 0.28);
+    if (isExport) stroke = withAlpha(COLOR.AMBER_BASE, 0.55);
+    if (flashT > 0) stroke = withAlpha(COLOR.TYPE_PRIMARY, 0.3 + 0.6 * flashT);
 
     ctx.strokeStyle = stroke;
     ctx.lineWidth = isExport ? 1.3 : 0.8;
@@ -244,9 +246,9 @@ function drawThresholdLines(
     // Right-edge icon + label
     ctx.fillStyle = stroke;
     ctx.textAlign = 'left';
-    let label = `${cfg.icon} ${cfg.name}`;
-    if (isExport) label = '🚢 Global export';
-    ctx.fillText(`${label} €${threshold.toFixed(1)}`, innerX + innerW + 4, y);
+    const label = isExport ? 'Global export' : cfg.name;
+    drawIcon(ctx, cfg.icon, innerX + innerW + 9, y, 9, stroke);
+    ctx.fillText(`${label} € ${threshold.toFixed(1)}`, innerX + innerW + 18, y);
   }
   ctx.restore();
 }
@@ -270,7 +272,7 @@ function drawProjection(
   const dailySlope = Math.min(0, rawDailySlope);
 
   ctx.save();
-  ctx.strokeStyle = 'rgba(6, 214, 160, 0.55)';
+  ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.55);
   ctx.setLineDash([4, 4]);
   ctx.lineWidth = 1.2;
   ctx.beginPath();
@@ -298,7 +300,7 @@ function drawCustomerMarkers(
 ): void {
   const today = state.gameDay;
   ctx.save();
-  ctx.font = '9px sans-serif';
+  ctx.font = canvasFont('9px', 'display', 'MEDIUM');
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   for (const c of state.customers) {
@@ -308,8 +310,8 @@ function drawCustomerMarkers(
     const idx = history.length - 1 - daysAgo;
     if (idx < 0 || idx >= history.length) continue;
     const priceAt = history[idx];
-    ctx.fillStyle = CUSTOMER_TYPES[c.type].color;
-    ctx.fillText(CUSTOMER_TYPES[c.type].icon, toX(idx), toY(priceAt) - 8);
+    const cfg = CUSTOMER_TYPES[c.type];
+    drawIcon(ctx, cfg.icon, toX(idx), toY(priceAt) - 8, 9, cfg.color);
   }
   ctx.restore();
 }
@@ -320,8 +322,8 @@ function drawCustomerMarkers(
  * Render the Budget history area chart: the player's cumulative budget
  * over the last N game days, with a red horizontal line at the
  * BANKRUPTCY_THRESHOLD so the player can see the ceiling of death
- * they must stay above. The line changes color dynamically — green
- * when trending up, amber when flat, red when trending down.
+ * they must stay above. The line changes color dynamically — teal
+ * when trending up, amber when flat, rust when trending down.
  */
 export function drawBudgetChart(
   ctx: CanvasRenderingContext2D,
@@ -333,9 +335,9 @@ export function drawBudgetChart(
 ): void {
   ctx.save();
 
-  ctx.fillStyle = 'rgba(10,14,23,0.80)';
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_DEEP, 0.8);
   ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = 'rgba(30,58,95,0.5)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.5);
   ctx.lineWidth = 1;
   ctx.strokeRect(x, y, w, h);
 
@@ -346,8 +348,8 @@ export function drawBudgetChart(
 
   const history = state.budgetHistory.slice(-sampleWindow);
   if (history.length < 2) {
-    ctx.fillStyle = 'rgba(100,116,139,0.75)';
-    ctx.font = '10px Courier New';
+    ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.75);
+    ctx.font = canvasFont('10px', 'mono');
     ctx.textBaseline = 'middle';
     ctx.textAlign = 'left';
     ctx.fillText('Budget history: collecting…', innerX, y + h / 2);
@@ -362,7 +364,7 @@ export function drawBudgetChart(
   const toX = (i: number) => innerX + (i / (history.length - 1)) * innerW;
 
   // Zero baseline
-  ctx.strokeStyle = 'rgba(100,116,139,0.3)';
+  ctx.strokeStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.3);
   ctx.setLineDash([2, 3]);
   ctx.lineWidth = 0.8;
   ctx.beginPath();
@@ -372,14 +374,14 @@ export function drawBudgetChart(
   ctx.setLineDash([]);
 
   // Bankruptcy threshold line — the "bottom of the pool".
-  ctx.strokeStyle = 'rgba(239, 68, 68, 0.75)';
+  ctx.strokeStyle = withAlpha(COLOR.RUST_BASE, 0.75);
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.moveTo(innerX, toY(ECONOMY.BANKRUPTCY_THRESHOLD));
   ctx.lineTo(innerX + innerW, toY(ECONOMY.BANKRUPTCY_THRESHOLD));
   ctx.stroke();
-  ctx.fillStyle = 'rgba(239, 68, 68, 0.9)';
-  ctx.font = '9px Courier New';
+  ctx.fillStyle = withAlpha(COLOR.RUST_BASE, 0.9);
+  ctx.font = canvasFont('9px', 'mono');
   ctx.textAlign = 'right';
   ctx.textBaseline = 'bottom';
   ctx.fillText('bankruptcy', innerX + innerW - 2, toY(ECONOMY.BANKRUPTCY_THRESHOLD) - 1);
@@ -388,12 +390,12 @@ export function drawBudgetChart(
   const last = history[history.length - 1];
   const prev = history[Math.max(0, history.length - 15)];
   const slope = last - prev;
-  const stroke = slope > 0 ? 'rgba(0, 255, 136, 0.95)'
-               : slope < 0 ? 'rgba(239, 68, 68, 0.95)'
-               : 'rgba(245, 158, 11, 0.95)';
-  const fill = slope > 0 ? 'rgba(0, 255, 136, 0.12)'
-             : slope < 0 ? 'rgba(239, 68, 68, 0.12)'
-             : 'rgba(245, 158, 11, 0.10)';
+  const stroke = slope > 0 ? withAlpha(COLOR.TEAL_BASE, 0.95)
+               : slope < 0 ? withAlpha(COLOR.RUST_BASE, 0.95)
+               : withAlpha(COLOR.AMBER_BASE, 0.95);
+  const fill = slope > 0 ? withAlpha(COLOR.TEAL_BASE, 0.12)
+             : slope < 0 ? withAlpha(COLOR.RUST_BASE, 0.12)
+             : withAlpha(COLOR.AMBER_BASE, 0.1);
 
   // Filled area under the line.
   ctx.beginPath();
@@ -415,11 +417,11 @@ export function drawBudgetChart(
   ctx.stroke();
 
   // Bottom label.
-  ctx.font = '9px Courier New';
+  ctx.font = canvasFont('9px', 'mono');
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   ctx.fillStyle = stroke;
-  const sign = last >= 0 ? '€' : '-€';
+  const sign = last >= 0 ? '€ ' : '-€ ';
   ctx.fillText(
     `Budget ${sign}${Math.abs(Math.round(last / 1e6))}M · ${history.length}d`,
     x + 6, y + h - 9

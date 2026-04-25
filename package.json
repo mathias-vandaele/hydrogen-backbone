@@ -14,6 +14,8 @@
     "vite": "^5.4.10"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/space-grotesk": "^5.2.10",
     "simplex-noise": "^4.0.3"
   }
 }

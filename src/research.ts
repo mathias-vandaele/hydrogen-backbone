@@ -16,7 +16,6 @@
 
 import {
   CAPEX,
-  ELECTROLYZER_EFFICIENCY,
   PRESSURE_PRICE_MAX,
   PRESSURE_PRICE_MIN
 } from './config';

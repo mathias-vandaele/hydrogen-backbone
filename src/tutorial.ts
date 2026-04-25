@@ -16,7 +16,7 @@ const STEPS: TutorialStep[] = [
   },
   {
     title: 'Step 1: Build a Hydrogen Plant',
-    text: 'Click "Solar Hydrogen Plant" in the build menu, then place it in a sunny southern region like Occitanie or PACA. Solar electricity is converted to hydrogen *inside the plant* at 70% efficiency — only molecules leave the facility.\n\n☀ Sunlight → ⚡ internal electricity → 🔬 electrolysis → 💧 H₂',
+    text: 'Click "Solar Hydrogen Plant" in the build menu, then place it in a sunny southern region like Occitanie or PACA. Solar electricity is converted to hydrogen *inside the plant* at 70% efficiency — only molecules leave the facility.\n\nSunlight -> internal electricity -> electrolysis -> H₂',
     btn: 'Next'
   },
   {

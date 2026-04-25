@@ -1,5 +1,7 @@
 // Shared types for state, config, and sim entities.
 
+import type { IconName } from './icons';
+
 // Bundled Hydrogen Plants (generator + integrated electrolyzer) replace the
 // v1/v2 separate solar/wind/nuclear farms + standalone electrolyzer. There
 // is no standalone electrolyzer — conversion is always internal to a plant,
@@ -30,7 +32,7 @@ export type CustomerType =
  */
 export interface HydrogenPlantConfig {
   name: string;
-  icon: string;
+  icon: IconName;
   kind: PlantKind;
   capacity: number;      // generator nameplate MW
   baseCost: number;
@@ -41,7 +43,7 @@ export interface HydrogenPlantConfig {
 
 export interface PipelineConfig {
   name: string;
-  icon: string;
+  icon: IconName;
   baseCostPerKm: number;
   maxFlow: number;
   linepackPerKm: number;
@@ -51,7 +53,7 @@ export interface PipelineConfig {
 
 export interface SaltCavernConfig {
   name: string;
-  icon: string;
+  icon: IconName;
   baseCost: number;
   volumeM3: number;
   storageKg: number;
@@ -74,7 +76,7 @@ export interface CustomerTypeConfig {
   archetype: CustomerArchetype;
   tier: CustomerTier;
   name: string;
-  icon: string;
+  icon: IconName;
   color: string;
   /** Nominal price threshold used for chart annotation and emergence. */
   priceThreshold: number;

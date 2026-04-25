@@ -43,7 +43,7 @@ const MILESTONES: Milestone[] = [
       totalDailyProduction() >= PRICE_INSIGHT_MIN_PRODUCTION_KG,
     insight: {
       title: 'The Oil Price Ceiling Is Closing',
-      text: 'H₂ below €3/kg and a real market behind it. At this level, e-fuels become competitive with oil — and keep falling. The fossil fuel industry does not need to be banned. It gets priced out. Quietly, permanently, by the flywheel you are spinning.'
+      text: 'H₂ below € 3/kg and a real market behind it. At this level, e-fuels become competitive with oil — and keep falling. The fossil fuel industry does not need to be banned. It gets priced out. Quietly, permanently, by the flywheel you are spinning.'
     }
   },
   {

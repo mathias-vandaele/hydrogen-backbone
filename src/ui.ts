@@ -1,4 +1,4 @@
-import { playClick } from './audio';
+import { playClick, playResearchComplete } from './audio';
 import { build, getCost, getRegionSaltCavern } from './buildings';
 import {
   BIG_TIER_CAP,
@@ -30,6 +30,7 @@ import {
   getTotalResearchTiers,
   MAX_RESEARCH_TIER
 } from './research';
+import { iconSvg } from './icons';
 import { createInitialState, replaceState, state } from './state';
 import { getSeason, getWeatherAt } from './weather';
 import type { BuildingType, Insight, ResearchTrackName } from './types';
@@ -47,6 +48,47 @@ export function computeRunwayDays(): number {
 
 let toastTimer: number | undefined;
 let lastResearchPanelSignature = '';
+
+function inlineIcon(icon: Parameters<typeof iconSvg>[0]): string {
+  return iconSvg(icon, 'bb-icon inline-icon');
+}
+
+type SeasonName = ReturnType<typeof getSeason>;
+
+const FRENCH_MONTHS = [
+  'JANVIER',
+  'FÉVRIER',
+  'MARS',
+  'AVRIL',
+  'MAI',
+  'JUIN',
+  'JUILLET',
+  'AOÛT',
+  'SEPTEMBRE',
+  'OCTOBRE',
+  'NOVEMBRE',
+  'DÉCEMBRE'
+];
+
+const FRENCH_SEASONS: Record<SeasonName, string> = {
+  Winter: 'HIVER',
+  Spring: 'PRINTEMPS',
+  Summer: 'ÉTÉ',
+  Autumn: 'AUTOMNE'
+};
+
+function formatFrenchDate(year: number, dayOfYear: number): string {
+  const currentDate = new Date(year, 0, dayOfYear);
+  return `${currentDate.getDate()} ${FRENCH_MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+}
+
+function formatCurrency(n: number): string {
+  return `${n < 0 ? '-€ ' : '€ '}${fmtMoney(Math.abs(n))}`;
+}
+
+function formatSignedCurrency(n: number): string {
+  return `${n >= 0 ? '+€ ' : '-€ '}${fmtMoney(Math.abs(n))}`;
+}
 
 /**
  * One-time UI wiring after DOM is ready: populate build costs, attach
@@ -67,6 +109,10 @@ export function initUI(): void {
   });
 
   $('#manifesto-close').addEventListener('click', closeManifesto);
+  $('#manifesto-popup').addEventListener('click', closeManifesto);
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && $('#manifesto-popup').style.display === 'flex') closeManifesto();
+  });
   const researchToggle = $maybe('#research-toggle');
   if (researchToggle) researchToggle.addEventListener('click', toggleResearchPanel);
   const researchCards = $maybe('#research-cards');
@@ -108,11 +154,11 @@ function showBuildQuote(btn: HTMLButtonElement, type: BuildingType): void {
   // so the player can *see* that only hydrogen leaves the facility.
   let html = '';
   if (type === 'solarPlant' || type === 'windPlant' || type === 'nuclearPlant') {
-    const srcIcon = type === 'solarPlant' ? '☀️' : type === 'windPlant' ? '💨' : '⚛️';
+    const srcIcon = type === 'solarPlant' ? 'solarPlant' : type === 'windPlant' ? 'windPlant' : 'nuclearPlant';
     const srcLabel = type === 'solarPlant' ? 'Sunlight'
                    : type === 'windPlant' ? 'Wind'
                    : 'Fission';
-    html += `<div class="flow-diagram">${srcIcon} ${srcLabel} <span class="flow-arrow">→</span> ⚡ internal <span class="flow-arrow">→</span> 🔬 70% <span class="flow-arrow">→</span> 💧 H₂ <em>to pipe</em></div>`;
+    html += `<div class="flow-diagram">${inlineIcon(srcIcon)} ${srcLabel} <span class="flow-arrow">-></span> internal <span class="flow-arrow">-></span> ${inlineIcon('electrolyzer')} 70% <span class="flow-arrow">-></span> H₂ <em>to pipe</em></div>`;
   }
   html += `<div class="quote-body">"${cfg.quote.replace(/^"|"$/g, '')}"</div>`;
   tip.innerHTML = html;
@@ -139,22 +185,20 @@ export function updateHUD(): void {
   updateResearchPanel();
   syncResearchAffordability();
 
-  // Budget now shown as signed — can go negative in v4. `warn` below €30M,
+  // Budget now shown as signed — can go negative in v4. `warn` below € 30M,
   // `danger` when negative.
   const moneyEl = $('#hud-money');
-  moneyEl.textContent = `${s.money < 0 ? '-€' : '€'}${fmtMoney(Math.abs(s.money))}`;
+  moneyEl.textContent = formatCurrency(s.money);
   moneyEl.className = `hud-value${s.money < 0 ? ' danger' : s.money < 30_000_000 ? ' warn' : ''}`;
-  $('#hud-price').textContent = `€${s.spotPrice.toFixed(2)}/kg`;
+  $('#hud-price').textContent = `€ ${s.spotPrice.toFixed(2)}/kg`;
   $('#hud-produced').textContent = fmtTonnes(s.totalH2Produced);
   $('#hud-customers').textContent = String(s.customers.filter(c => c.active).length);
 
   // Date display follows the simulation's day-of-year so the visible
   // calendar stays aligned with weather and seasonality.
   const currentYear = 2025 + Math.floor((s.gameDay - 1) / 365);
-  const currentDate = new Date(currentYear, 0, s.dayOfYear);
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  $('#hud-day').textContent = `${months[currentDate.getMonth()]} ${currentDate.getDate()}, ${currentDate.getFullYear()}`;
-  $('#hud-season').textContent = getSeason(s.dayOfYear);
+  $('#hud-day').textContent = formatFrenchDate(currentYear, s.dayOfYear);
+  $('#hud-season').textContent = FRENCH_SEASONS[getSeason(s.dayOfYear)];
 
   // Status bar: show rolling 24h averages as the strategic number, with
   // the instantaneous value as dim "now:" context so the player can
@@ -179,9 +223,9 @@ export function updateHUD(): void {
   const revEl = $('#stat-revenue');
   const opxEl = $('#stat-opex');
   const netEl = $('#stat-net');
-  revEl.textContent = `+€${fmtMoney(avgRevenue)}/day`;
-  opxEl.textContent = `-€${fmtMoney(avgOpex)}/day`;
-  netEl.textContent = `${net >= 0 ? '+' : '-'}€${fmtMoney(Math.abs(net))}/day`;
+  revEl.textContent = `${formatSignedCurrency(avgRevenue)}/day`;
+  opxEl.textContent = `${formatSignedCurrency(-avgOpex)}/day`;
+  netEl.textContent = `${formatSignedCurrency(net)}/day`;
   netEl.classList.toggle('good', net > 0);
   netEl.classList.toggle('bad', net < 0);
 
@@ -250,7 +294,7 @@ function updateGameOverScreen(): void {
     const reasonEl = $('#gameover-reason');
     if (over.reason === 'bankruptcy') {
       reasonEl.textContent =
-        'The budget sat below €-50M for 90 consecutive days. The operation ran out of runway before the flywheel caught — your capital was exhausted before a large enough market formed.';
+        'The budget sat below -€ 50M for 90 consecutive days. The operation ran out of runway before the flywheel caught — your capital was exhausted before a large enough market formed.';
     } else {
       reasonEl.textContent = over.reason;
     }
@@ -274,8 +318,8 @@ function summaryStats(): Array<{ label: string; value: string }> {
     { label: 'Customers online', value: String(s.customers.filter(c => c.active).length) },
     { label: 'Peak network pressure', value: `${s.networkPressure.toFixed(1)} bar` },
     { label: 'Connected regions', value: `${connected} / ${Object.keys(s.regions).length}` },
-    { label: 'Final spot price', value: `€${s.spotPrice.toFixed(2)}/kg` },
-    { label: 'Final budget', value: `€${Math.round(s.money / 1e6)}M` }
+    { label: 'Final spot price', value: `€ ${s.spotPrice.toFixed(2)}/kg` },
+    { label: 'Final budget', value: formatCurrency(s.money) }
   ];
 }
 
@@ -314,12 +358,12 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   html += bar('Wind', rc.windBase);
   html += bar('Nuclear', Math.min(1, rc.nuclearBonus / 1.5));
   html += bar('Industry', Math.min(1, rc.industryDemand));
-  if (rc.hasPort) html += `<div class="sub-line">🚢 Port: ${rc.portName}</div>`;
-  html += `<div class="sub-line">🧂 Cavern geology: ${cavernEligible ? 'viable' : 'not suitable (no salt)'}</div>`;
+  if (rc.hasPort) html += `<div class="sub-line">${inlineIcon('exportTerminal')} Port: ${rc.portName}</div>`;
+  html += `<div class="sub-line">${inlineIcon('saltCavern')} Cavern geology: ${cavernEligible ? 'viable' : 'not suitable (no salt)'}</div>`;
 
   html += `<div class="sub-section">`;
-  html += `<div class="sub-line">☁ Cloud ${Math.round(w.clouds * 100)}% · 🌬 Wind ${(w.wind * 100).toFixed(0)}%</div>`;
-  html += `<div class="sub-line">🏗 Buildings: ${buildingCount} / ${rc.maxSlots}</div>`;
+  html += `<div class="sub-line">Cloud ${Math.round(w.clouds * 100)}% · Wind ${(w.wind * 100).toFixed(0)}%</div>`;
+  html += `<div class="sub-line">Buildings: ${buildingCount} / ${rc.maxSlots}</div>`;
   if (cavern) {
     if (rs.pipeConnections > 0) html += `<div class="sub-line">Salt Cavern: online — contributing to network storage</div>`;
     else html += `<div class="sub-line">Salt Cavern: online — awaiting pipeline connection</div>`;
@@ -327,12 +371,12 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   const avgRegionSupply = getRollingRegionSupply(state, regionId);
   const avgRegionDemand = getRollingRegionDemand(state, regionId);
   if (rs.pipeConnections > 0) {
-    html += `<div class="sub-line">📊 Pressure: ${rs.pressure.toFixed(1)} bar · €${rs.localPrice.toFixed(2)}/kg</div>`;
-    html += `<div class="sub-line">Supply ${Math.round(avgRegionSupply)} / Demand ${Math.round(avgRegionDemand)} kg/day (24h avg)</div>`;
-    html += `<div class="sub-line tooltip-now">now ${Math.round(rs.supply)} / ${Math.round(rs.demand)}</div>`;
+    html += `<div class="sub-line">${inlineIcon('pressureGauge')} Pressure: ${rs.pressure.toFixed(1)} bar · € ${rs.localPrice.toFixed(2)}/kg</div>`;
+    html += `<div class="sub-line">Supply ${fmtWhole(avgRegionSupply)} / Demand ${fmtWhole(avgRegionDemand)} kg/day (24h avg)</div>`;
+    html += `<div class="sub-line tooltip-now">now ${fmtWhole(rs.supply)} / ${fmtWhole(rs.demand)}</div>`;
   } else if (rs.supply > 0 || avgRegionSupply > 0) {
-    html += `<div class="sub-line">Supply ${Math.round(avgRegionSupply)} kg/day (24h avg, no pipe)</div>`;
-    html += `<div class="sub-line tooltip-now">now ${Math.round(rs.supply)}</div>`;
+    html += `<div class="sub-line">Supply ${fmtWhole(avgRegionSupply)} kg/day (24h avg, no pipe)</div>`;
+    html += `<div class="sub-line tooltip-now">now ${fmtWhole(rs.supply)}</div>`;
   } else {
     html += `<div class="sub-line">Not connected to backbone</div>`;
   }
@@ -369,13 +413,13 @@ export function updateBuildCosts(): void {
     if (!costEl) continue;
     if (type === 'pipeline') {
       const pipeCfg = cfg as typeof BUILDINGS.pipeline;
-      costEl.textContent = `~€${fmtMoney(pipeCfg.baseCostPerKm)}/km`;
+      costEl.textContent = `~€ ${fmtMoney(pipeCfg.baseCostPerKm)}/km`;
       btn.classList.toggle('disabled', state.money < 5_000_000);
     } else {
       const cost = getCost(type as Exclude<BuildingType, 'pipeline'>);
       costEl.textContent = type === 'saltCavern'
-        ? `€${fmtMoney(cost)} · 2 Mm³`
-        : `€${fmtMoney(cost)}`;
+        ? `€ ${fmtMoney(cost)} · 2 Mm³`
+        : `€ ${fmtMoney(cost)}`;
       btn.classList.toggle('disabled', state.money < cost);
     }
   }
@@ -423,18 +467,18 @@ export function showRegionInfo(regionId: string): void {
   html += row('Capital', rc.capital);
   html += row('Solar Potential', `${(rc.solarBase * 100).toFixed(0)}%`);
   html += row('Wind Potential', `${(rc.windBase * 100).toFixed(0)}%`);
-  html += row('Nuclear', rc.nuclearBonus > 0.5 ? `⚛️ Yes (×${rc.nuclearBonus.toFixed(1)})` : 'No');
+  html += row('Nuclear', rc.nuclearBonus > 0.5 ? `Yes (×${rc.nuclearBonus.toFixed(1)})` : 'No');
   html += row('Industry Factor', `${(rc.industryDemand * 100).toFixed(0)}%`);
-  if (rc.hasPort) html += row('Port', `🚢 ${rc.portName}`);
+  if (rc.hasPort) html += row('Port', `${inlineIcon('exportTerminal')} ${rc.portName}`);
   html += row('Gas Infrastructure', `${(rc.gasInfra * 100).toFixed(0)}%`);
   html += row('Pipe Connections', String(rs.pipeConnections || 0));
-  html += row('Local H₂ Price', `€${rs.localPrice.toFixed(2)}/kg`);
+  html += row('Local H₂ Price', `€ ${rs.localPrice.toFixed(2)}/kg`);
   html += row('Pressure', `${rs.pressure.toFixed(1)} bar`);
   html += row('Cavern Geology', SALT_CAVERN_ELIGIBLE_REGIONS[regionId] ? 'Viable' : 'Not suitable (no salt)');
   const infoAvgSupply = getRollingRegionSupply(state, regionId);
   const infoAvgDemand = getRollingRegionDemand(state, regionId);
-  html += row('Supply (24h avg)', `${Math.round(infoAvgSupply)} kg/day · now ${Math.round(rs.supply)}`);
-  html += row('Demand (24h avg)', `${Math.round(infoAvgDemand)} kg/day · now ${Math.round(rs.demand)}`);
+  html += row('Supply (24h avg)', `${fmtWhole(infoAvgSupply)} kg/day · now ${fmtWhole(rs.supply)}`);
+  html += row('Demand (24h avg)', `${fmtWhole(infoAvgDemand)} kg/day · now ${fmtWhole(rs.demand)}`);
   const cavern = getRegionSaltCavern(regionId);
   if (cavern) {
     if (rs.pipeConnections > 0) {
@@ -443,7 +487,7 @@ export function showRegionInfo(regionId: string): void {
       html += row('Salt Cavern', 'Online — awaiting pipeline connection');
     }
   } else if (SALT_CAVERN_ELIGIBLE_REGIONS[regionId]) {
-    html += `<div class="info-section"><h4>Salt Cavern</h4><button id="info-build-cavern" class="info-action-btn">Build Salt Cavern <span class="info-action-cost">€${fmtMoney(BUILDINGS.saltCavern.baseCost)}</span></button><div class="info-action-meta">2 Mm³ · ~15,000 tonnes H₂ · immediate backbone storage</div></div>`;
+    html += `<div class="info-section"><h4>Salt Cavern</h4><button id="info-build-cavern" class="info-action-btn">Build Salt Cavern <span class="info-action-cost">€ ${fmtMoney(BUILDINGS.saltCavern.baseCost)}</span></button><div class="info-action-meta">2 Mm³ · ~15,000 tonnes H₂ · immediate backbone storage</div></div>`;
   }
 
   if (buildings.length > 0) {
@@ -452,21 +496,21 @@ export function showRegionInfo(regionId: string): void {
     for (const b of buildings) counts[b.type] = (counts[b.type] || 0) + 1;
     for (const [type, count] of Object.entries(counts)) {
       const cfg = BUILDINGS[type as BuildingType];
-      html += `<div style="padding:2px 0;font-size:11px">${cfg.icon} ${cfg.name} ×${count}</div>`;
+      html += `<div class="icon-list-row">${inlineIcon(cfg.icon)} ${cfg.name} ×${count}</div>`;
     }
     if (cavern) {
-      html += `<div style="padding:2px 0;font-size:11px">${BUILDINGS.saltCavern.icon} ${BUILDINGS.saltCavern.name} ×1</div>`;
+      html += `<div class="icon-list-row">${inlineIcon(BUILDINGS.saltCavern.icon)} ${BUILDINGS.saltCavern.name} ×1</div>`;
     }
     html += '</div>';
   } else if (cavern) {
-    html += `<div class="info-section"><h4>Buildings (1/${rc.maxSlots})</h4><div style="padding:2px 0;font-size:11px">${BUILDINGS.saltCavern.icon} ${BUILDINGS.saltCavern.name} ×1</div></div>`;
+    html += `<div class="info-section"><h4>Buildings (1/${rc.maxSlots})</h4><div class="icon-list-row">${inlineIcon(BUILDINGS.saltCavern.icon)} ${BUILDINGS.saltCavern.name} ×1</div></div>`;
   }
 
   if (customers.length > 0) {
     html += `<div class="info-section"><h4>Customers (${customers.length})</h4>`;
     for (const c of customers) {
       const cfg = CUSTOMER_TYPES[c.type];
-      html += `<div style="padding:2px 0;font-size:11px">${cfg.icon} ${c.name} (${fmtNum(c.demand)} kg/day)</div>`;
+      html += `<div class="icon-list-row">${inlineIcon(cfg.icon)} ${c.name} (${fmtNum(c.demand)} kg/day)</div>`;
     }
     html += '</div>';
   }
@@ -501,7 +545,7 @@ export function hideInfoPanel(): void {
 
 /**
  * Show a brief floating message near the top of the screen and fade it
- * out after 2.5s. Used for ephemeral feedback: "Game saved ✓",
+ * out after 2.5s. Used for ephemeral feedback: "Game saved",
  * "Pipeline already exists", "New Steel DRI Plant in Hauts-de-France!".
  */
 export function showToast(msg: string): void {
@@ -521,9 +565,10 @@ export function showToast(msg: string): void {
  * Player dismisses with the "Continue" button wired in initUI.
  */
 export function showManifesto(insight: Insight): void {
-  $('#mp-title').textContent = insight.title;
-  $('#mp-text').textContent = insight.text;
-  $('#manifesto-popup').style.display = 'block';
+  const ref = String(134 + state.insightIndex).padStart(3, '0');
+  $('#mp-title').textContent = `NOTE DE SERVICE · Document Réf. 2027-M/${ref}`;
+  $('#mp-text').textContent = `${insight.title}\n\n${insight.text}`;
+  $('#manifesto-popup').style.display = 'flex';
 }
 
 /** Close the manifesto modal. */
@@ -548,12 +593,12 @@ function investInResearch(track: ResearchTrackName): void {
     return;
   }
   if (!buyResearchTier(state, track)) {
-    showToast(`Need €${fmtMoney(nextCost)} for the next ${labelResearchTrack(track)} tier.`);
+    showToast(`Need € ${fmtMoney(nextCost)} for the next ${labelResearchTrack(track)} tier.`);
     return;
   }
   updateBuildCosts();
   updateResearchPanel();
-  playClick();
+  playResearchComplete();
   showToast(`${labelResearchTrack(track)} research advanced to tier ${state.research[track].tier}.`);
 }
 
@@ -590,12 +635,16 @@ function renderResearchCard(track: ResearchTrackName): string {
   const maxed = tier >= MAX_RESEARCH_TIER;
   const affordable = nextCost !== null && state.money >= nextCost;
   const lines = getResearchCardLines(track, tier);
+  const pips = Array.from({ length: MAX_RESEARCH_TIER }, (_, index) =>
+    `<span class="research-pip${index < tier ? ' on' : ''}"></span>`
+  ).join('');
   const action = maxed
-    ? `<div class="research-maxed">Research complete</div>`
-    : `<button class="research-buy" data-research-track="${track}"${affordable ? '' : ' disabled'}>${affordable ? 'Invest' : 'Insufficient budget'} · €${fmtMoney(nextCost ?? 0)}</button>`;
-  return `<div class="research-card">
+    ? `<div class="research-maxed">Recherche complète</div>`
+    : `<button class="research-buy" data-research-track="${track}"${affordable ? '' : ' disabled'}>${affordable ? 'Invest' : 'Insufficient budget'} · € ${fmtMoney(nextCost ?? 0)}</button>`;
+  return `<div class="research-card${maxed ? ' research-card-complete' : ''}">
     <h4>${labelResearchTrack(track)} Research</h4>
     <div class="research-tier">Tier ${tier} of ${MAX_RESEARCH_TIER}</div>
+    <div class="research-pips">${pips}</div>
     <div class="research-line"><strong>Current:</strong> ${lines.current}</div>
     <div class="research-line"><strong>Next:</strong> ${lines.next}</div>
     ${action}
@@ -613,7 +662,7 @@ function syncResearchAffordability(): void {
     if (nextCost === null) return;
     const affordable = state.money >= nextCost;
     btn.disabled = !affordable;
-    btn.textContent = `${affordable ? 'Invest' : 'Insufficient budget'} · €${fmtMoney(nextCost)}`;
+    btn.textContent = `${affordable ? 'Invest' : 'Insufficient budget'} · € ${fmtMoney(nextCost)}`;
   });
 }
 
@@ -678,11 +727,14 @@ export function fmtMoney(n: number): string {
   return String(Math.round(n));
 }
 
-/** Generic numeric formatter with SI suffixes (K / M), 1 decimal. */
+/** Generic numeric formatter for readouts that should keep separators. */
 export function fmtNum(n: number): string {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}K`;
-  return String(Math.round(n));
+  return fmtWhole(n);
+}
+
+/** Whole-number formatter with thousands separators for instrument readouts. */
+export function fmtWhole(n: number): string {
+  return Math.round(n).toLocaleString('en-US');
 }
 
 /** Power formatter in MW, keeping a little precision at small values. */
@@ -696,8 +748,8 @@ export function fmtMw(n: number): string {
 /** Mass formatter: kg → kg/t/Kt/Mt with a suffix attached. */
 export function fmtTonnes(kg: number): string {
   const t = kg / 1000;
-  if (t >= 1e6) return `${(t / 1e6).toFixed(1)}Mt`;
-  if (t >= 1e3) return `${(t / 1e3).toFixed(1)}Kt`;
-  if (t >= 1) return `${t.toFixed(1)}t`;
-  return `${Math.round(kg)}kg`;
+  if (t >= 1e6) return `${(t / 1e6).toFixed(1)} Mt`;
+  if (t >= 1e3) return `${(t / 1e3).toFixed(1)} Kt`;
+  if (t >= 1) return `${t.toFixed(1)} t`;
+  return `${fmtWhole(kg)} kg`;
 }

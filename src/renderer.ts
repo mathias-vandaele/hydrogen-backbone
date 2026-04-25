@@ -3,21 +3,25 @@ import {
   BUILDINGS,
   CUSTOMER_TYPES,
   MAX_PRESSURE,
-  getRegionConfig,
-  hslString,
-  pipeColorHsl
+  getRegionConfig
 } from './config';
+import { COLOR, GLOW, TEXTURE, TYPE, canvasFont, generateNoiseDataURL, pressureColor, withAlpha } from './design-system';
 import { drawGauge } from './gauge';
+import { drawIcon } from './icons';
 import { input } from './input';
 import { distanceBetween, gasCorridorScreenPaths, getCenter, mapView } from './map';
+import { applyFit, project as lambertProject } from './projection';
 import { state } from './state';
 import { fmtMoney } from './ui';
-import { getSeasonalTint } from './weather';
 
 const render = {
   lastTime: 0,
   animPhase: 0
 };
+
+let noiseImage: HTMLImageElement | null = null;
+let noisePattern: CanvasPattern | null = null;
+let noiseReady = false;
 
 /**
  * Render one frame. Back-to-front order matters: backdrop, seasonal
@@ -36,11 +40,12 @@ export function drawFrame(timestamp: number): void {
   const w = mapView.width;
   const h = mapView.height;
 
-  ctx.fillStyle = '#060a12';
+  ctx.fillStyle = COLOR.SURFACE_DEEP;
   ctx.fillRect(0, 0, w, h);
 
   drawSeasonAtmosphere(ctx, w, h);
-  drawGrid(ctx, w, h);
+  drawMapPlate(ctx);
+  drawGrid(ctx);
   drawRegions(ctx);
   drawGasCorridors(ctx);
   drawRegionFlashes(ctx);
@@ -51,33 +56,21 @@ export function drawFrame(timestamp: number): void {
   drawSaltCaverns(ctx);
   drawCustomers(ctx);
   drawPlacementGhost(ctx);
+  drawMapFurniture(ctx, w, h);
   drawDashboard(ctx, w, h);
+  drawTextureOverlay(ctx, w, h);
 }
 
 // ─── Seasonal atmosphere ─────────────────────────────────────────────────
 
 /**
- * Slow-moving seasonal light wash behind the map. Uses the existing
- * calendar tint as the palette source, then drifts two very large radial
- * gradients over the canvas at a barely-noticeable pace so the world
- * feels alive without flicker or visual noise.
+ * Slow-moving material light wash behind the map. This keeps the world
+ * breathing without returning to the old sci-fi cyan weather tint.
  */
 function drawSeasonAtmosphere(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  const tint = getSeasonalTint(state.dayOfYear);
   const phase = render.animPhase * 0.06;
   const driftX = Math.sin(phase) * w * 0.08;
   const driftY = Math.cos(phase * 0.7) * h * 0.06;
-
-  const warm = {
-    r: Math.min(255, tint.r + 28),
-    g: Math.min(255, tint.g + 18),
-    b: Math.min(255, tint.b + 12)
-  };
-  const cool = {
-    r: Math.max(0, tint.r - 32),
-    g: Math.max(0, tint.g - 24),
-    b: Math.max(0, tint.b - 18)
-  };
 
   ctx.save();
 
@@ -89,9 +82,9 @@ function drawSeasonAtmosphere(ctx: CanvasRenderingContext2D, w: number, h: numbe
     h * 0.22 + driftY,
     Math.max(w, h) * 0.7
   );
-  primary.addColorStop(0, `rgba(${warm.r},${warm.g},${warm.b},0.16)`);
-  primary.addColorStop(0.55, `rgba(${tint.r},${tint.g},${tint.b},0.08)`);
-  primary.addColorStop(1, 'rgba(0,0,0,0)');
+  primary.addColorStop(0, withAlpha(COLOR.AMBER_DIM, 0.09));
+  primary.addColorStop(0.55, withAlpha(COLOR.AMBER_BASE, 0.04));
+  primary.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, 0));
   ctx.fillStyle = primary;
   ctx.fillRect(0, 0, w, h);
 
@@ -103,14 +96,63 @@ function drawSeasonAtmosphere(ctx: CanvasRenderingContext2D, w: number, h: numbe
     h * 0.78 - driftY * 0.5,
     Math.max(w, h) * 0.62
   );
-  secondary.addColorStop(0, `rgba(${cool.r},${cool.g},${cool.b},0.10)`);
-  secondary.addColorStop(0.7, `rgba(${cool.r},${cool.g},${cool.b},0.04)`);
-  secondary.addColorStop(1, 'rgba(0,0,0,0)');
+  secondary.addColorStop(0, withAlpha(COLOR.TEAL_DIM, 0.045));
+  secondary.addColorStop(0.7, withAlpha(COLOR.SURFACE_RAISED, 0.035));
+  secondary.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, 0));
   ctx.fillStyle = secondary;
   ctx.fillRect(0, 0, w, h);
 
-  ctx.fillStyle = `rgba(${tint.r},${tint.g},${tint.b},0.035)`;
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_BASE, 0.08);
   ctx.fillRect(0, 0, w, h);
+  ctx.restore();
+}
+
+// ─── Map plate ───────────────────────────────────────────────────────────
+
+/**
+ * The geography sits on a distinct drafting plate instead of dissolving
+ * into the app background. This is not a floating card; it is the map's
+ * physical substrate, giving the land mass enough value contrast to read.
+ */
+function drawMapPlate(ctx: CanvasRenderingContext2D): void {
+  const { mapX: x, mapY: y, mapW: w, mapH: h } = mapView;
+  if (w <= 0 || h <= 0) return;
+
+  ctx.save();
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_BASE, 0.82);
+  ctx.fillRect(x, y, w, h);
+
+  const wash = ctx.createLinearGradient(x, y, x + w, y + h);
+  wash.addColorStop(0, withAlpha(COLOR.SURFACE_RAISED, 0.18));
+  wash.addColorStop(0.48, withAlpha(COLOR.SURFACE_BASE, 0.02));
+  wash.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, 0.24));
+  ctx.fillStyle = wash;
+  ctx.fillRect(x, y, w, h);
+
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.95);
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+
+  ctx.strokeStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.18);
+  ctx.lineWidth = 0.5;
+  const tick = 8;
+  for (let tx = x + 24; tx < x + w - 24; tx += 48) {
+    ctx.beginPath();
+    ctx.moveTo(tx, y);
+    ctx.lineTo(tx, y + tick);
+    ctx.moveTo(tx, y + h);
+    ctx.lineTo(tx, y + h - tick);
+    ctx.stroke();
+  }
+  for (let ty = y + 24; ty < y + h - 24; ty += 48) {
+    ctx.beginPath();
+    ctx.moveTo(x, ty);
+    ctx.lineTo(x + tick, ty);
+    ctx.moveTo(x + w, ty);
+    ctx.lineTo(x + w - tick, ty);
+    ctx.stroke();
+  }
+
   ctx.restore();
 }
 
@@ -119,7 +161,7 @@ const regionFlashes = new Map<string, number>(); // regionId → start timestamp
 const FLASH_MS = 1200;
 
 /**
- * Kick off a cyan fade-out highlight over a region. Used by customers.ts
+ * Kick off an amber fade-out highlight over a region. Used by customers.ts
  * when a new customer materializes, so the player's eye is drawn to the
  * region even if it's off their current focus.
  */
@@ -140,12 +182,12 @@ function drawRegionFlashes(ctx: CanvasRenderingContext2D): void {
     const rp = mapView.regionPaths.find(p => p.id === id);
     if (!rp) continue;
     ctx.save();
-    ctx.fillStyle = `rgba(6,214,160,${0.35 * t})`;
+    ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.28 * t);
     ctx.fill(rp.path);
-    ctx.shadowColor = `rgba(6,214,160,${0.8 * t})`;
-    ctx.shadowBlur = 28 * t;
+    ctx.shadowColor = withAlpha(COLOR.AMBER_BRIGHT, 0.7 * t);
+    ctx.shadowBlur = GLOW.MEDIUM.blur * 2.2 * t;
     ctx.lineWidth = 2 + t * 2;
-    ctx.strokeStyle = `rgba(180,255,230,${0.9 * t})`;
+    ctx.strokeStyle = withAlpha(COLOR.AMBER_GLOW, 0.9 * t);
     ctx.stroke(rp.path);
     ctx.restore();
   }
@@ -173,8 +215,8 @@ function drawDashboard(ctx: CanvasRenderingContext2D, w: number, h: number): voi
 /**
  * Render a semi-transparent icon that follows the cursor while a building
  * is selected for placement. Snaps to the hovered region's centroid when
- * the placement is valid (green ring), stays at the mouse with a red
- * ring when not. No-op in pipeline mode — the pipe preview handles that.
+ * the placement is valid, stays at the mouse with a rust ring when not.
+ * No-op in pipeline mode — the pipe preview handles that.
  */
 function drawPlacementGhost(ctx: CanvasRenderingContext2D): void {
   if (!input.buildMode || input.buildMode === 'pipeline') return;
@@ -196,7 +238,7 @@ function drawPlacementGhost(ctx: CanvasRenderingContext2D): void {
     gy = c[1] + 16;
     // Draw snap target ring on the centroid
     ctx.save();
-    ctx.strokeStyle = 'rgba(6,214,160,0.65)';
+    ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.65);
     ctx.lineWidth = 1.2;
     ctx.setLineDash([3, 3]);
     ctx.beginPath();
@@ -205,9 +247,9 @@ function drawPlacementGhost(ctx: CanvasRenderingContext2D): void {
     ctx.restore();
   }
 
-  // Tint ring behind the ghost (green valid, red invalid)
-  const ringColor = valid ? 'rgba(6,214,160,0.55)' : 'rgba(239,68,68,0.65)';
-  ctx.fillStyle = valid ? 'rgba(6,214,160,0.12)' : 'rgba(239,68,68,0.15)';
+  // Tint ring behind the ghost (amber valid, rust invalid)
+  const ringColor = valid ? withAlpha(COLOR.AMBER_BASE, 0.55) : withAlpha(COLOR.RUST_BASE, 0.65);
+  ctx.fillStyle = valid ? withAlpha(COLOR.AMBER_BASE, 0.12) : withAlpha(COLOR.RUST_BASE, 0.15);
   ctx.strokeStyle = ringColor;
   ctx.lineWidth = 1.5;
   ctx.beginPath();
@@ -217,11 +259,7 @@ function drawPlacementGhost(ctx: CanvasRenderingContext2D): void {
 
   ctx.shadowColor = ringColor;
   ctx.shadowBlur = 12;
-  ctx.font = '16px sans-serif';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillStyle = valid ? '#e0e7ff' : '#fecaca';
-  ctx.fillText(cfg.icon, gx, gy);
+  drawIcon(ctx, cfg.icon, gx, gy, 18, valid ? COLOR.TYPE_PRIMARY : COLOR.RUST_BRIGHT);
 
   ctx.restore();
 }
@@ -233,28 +271,33 @@ function drawPlacementGhost(ctx: CanvasRenderingContext2D): void {
  * region fills sit on top. Pure decoration — gives the scene a scale
  * reference and an "industrial control room" feel.
  */
-function drawGrid(ctx: CanvasRenderingContext2D, w: number, h: number): void {
-  ctx.strokeStyle = 'rgba(30,58,95,0.15)';
+function drawGrid(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(mapView.mapX, mapView.mapY, mapView.mapW, mapView.mapH);
+  ctx.clip();
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.28);
   ctx.lineWidth = 0.5;
   const spacing = 40;
-  for (let x = 0; x < w; x += spacing) {
+  for (let x = mapView.mapX; x < mapView.mapX + mapView.mapW; x += spacing) {
     ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x, h);
+    ctx.moveTo(x, mapView.mapY);
+    ctx.lineTo(x, mapView.mapY + mapView.mapH);
     ctx.stroke();
   }
-  for (let y = 0; y < h; y += spacing) {
+  for (let y = mapView.mapY; y < mapView.mapY + mapView.mapH; y += spacing) {
     ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(w, y);
+    ctx.moveTo(mapView.mapX, y);
+    ctx.lineTo(mapView.mapX + mapView.mapW, y);
     ctx.stroke();
   }
+  ctx.restore();
 }
 
 // ─── Regions ──────────────────────────────────────────────────────────────
 
 /**
- * Render every region polygon with base fill, supply-intensity cyan tint,
+ * Render every region polygon with base fill, supply-intensity amber tint,
  * slot-fill warm tint, and outline. Overlays the region's abbreviation
  * label and a small pressure-bar readout for connected regions.
  */
@@ -267,16 +310,25 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
     const isHovered = mapView.hoveredRegion === rp.id;
     const isSelected = mapView.selectedRegion === rp.id;
 
-    // Base fill
-    if (isSelected) ctx.fillStyle = 'rgba(6,214,160,0.18)';
-    else if (isHovered) ctx.fillStyle = 'rgba(6,214,160,0.09)';
-    else ctx.fillStyle = rp.config.color;
+    // Base fill: land is deliberately raised above the drafting plate so
+    // the map reads at a glance even before any network is built.
+    ctx.save();
+    ctx.shadowColor = withAlpha(COLOR.SURFACE_DEEP, 0.55);
+    ctx.shadowBlur = 5;
+    ctx.shadowOffsetY = 1;
+    ctx.fillStyle = withAlpha(COLOR.SURFACE_RAISED, isHovered ? 1 : 0.9);
     ctx.fill(rp.path);
+    ctx.restore();
+
+    if (isSelected || isHovered) {
+      ctx.fillStyle = isSelected ? withAlpha(COLOR.AMBER_BASE, 0.24) : withAlpha(COLOR.TYPE_PRIMARY, 0.04);
+      ctx.fill(rp.path);
+    }
 
     // Supply/demand tint
     if (rs.supply > 0 && rs.pipeConnections > 0) {
       const intensity = Math.min(0.15, rs.supply / 50000 * 0.15);
-      ctx.fillStyle = `rgba(6,214,160,${intensity})`;
+      ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, intensity);
       ctx.fill(rp.path);
     }
 
@@ -284,22 +336,24 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
     // warm glow; a fully-saturated region visibly lights up at night.
     const fill = slotFillRatio(rp.id);
     if (fill > 0) {
-      ctx.fillStyle = `rgba(251, 191, 36, ${0.04 + 0.18 * fill})`;
+      ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.04 + 0.18 * fill);
       ctx.fill(rp.path);
     }
 
     const centroid = rp.region.centroid;
 
     // Stroke
-    ctx.strokeStyle = isSelected ? '#06d6a0' : isHovered ? 'rgba(6,214,160,0.6)' : 'rgba(30,58,95,0.55)';
-    ctx.lineWidth = isSelected ? 2 : 1;
+    ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.85);
+    ctx.lineWidth = isSelected ? 3.2 : 2.4;
+    ctx.stroke(rp.path);
+    ctx.strokeStyle = isSelected
+      ? COLOR.AMBER_BRIGHT
+      : isHovered ? withAlpha(COLOR.AMBER_BASE, 0.8) : withAlpha(COLOR.TYPE_TERTIARY, 0.7);
+    ctx.lineWidth = isSelected ? 1.6 : 0.9;
     ctx.stroke(rp.path);
 
-    // Abbr label + pressure bar
-    ctx.font = '10px Courier New';
-    ctx.fillStyle = isHovered || isSelected ? '#06d6a0' : 'rgba(224,231,255,0.5)';
-    ctx.textAlign = 'center';
-    ctx.fillText(rp.config.abbr, centroid.x, centroid.y - 4);
+    // Region label + pressure bar
+    drawRegionLabel(ctx, rp.config.name, centroid.x, centroid.y - 6, isHovered || isSelected);
 
     if (rs.pipeConnections > 0) {
       const pressureRatio = rs.pressure / MAX_PRESSURE;
@@ -307,13 +361,39 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
       const barH = 3;
       const bx = centroid.x - barW / 2;
       const by = centroid.y + 4;
-      ctx.fillStyle = 'rgba(0,0,0,0.45)';
+      ctx.fillStyle = withAlpha(COLOR.SURFACE_DEEP, 0.72);
       ctx.fillRect(bx, by, barW, barH);
-      const hsl = pipeColorHsl(pressureRatio);
-      ctx.fillStyle = hslString(hsl, 0.8);
+      ctx.fillStyle = pressureColor(pressureRatio, 0.85);
       ctx.fillRect(bx, by, barW * pressureRatio, barH);
     }
   }
+}
+
+function drawRegionLabel(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, active: boolean): void {
+  const labelBreaks: Record<string, string[]> = {
+    'Auvergne-Rhône-Alpes': ['Auvergne-Rhône', 'Alpes'],
+    'Bourgogne-Franche-Comté': ['Bourgogne', 'Franche-Comté'],
+    'Centre-Val de Loire': ['Centre-Val', 'de Loire'],
+    'Nouvelle-Aquitaine': ['Nouvelle', 'Aquitaine'],
+    "Provence-Alpes-Côte d'Azur": ['Provence-Alpes', "Côte d'Azur"]
+  };
+  const lines = labelBreaks[name] ?? [name];
+  const longest = Math.max(...lines.map(line => line.length));
+  const lineHeight = longest > 17 ? 9 : 10;
+
+  ctx.save();
+  ctx.font = canvasFont(longest > 17 ? '9px' : TYPE.SIZE.MICRO, 'mono', 'MEDIUM');
+  ctx.fillStyle = active ? COLOR.AMBER_BASE : withAlpha(COLOR.TYPE_SECONDARY, 0.62);
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.72);
+  ctx.lineWidth = 3;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  lines.forEach((line, index) => {
+    const ly = y + (index - (lines.length - 1) / 2) * lineHeight;
+    ctx.strokeText(line, x, ly);
+    ctx.fillText(line, x, ly);
+  });
+  ctx.restore();
 }
 
 /**
@@ -338,7 +418,7 @@ function slotFillRatio(regionId: string): number {
  */
 function drawGasCorridors(ctx: CanvasRenderingContext2D): void {
   ctx.save();
-  ctx.strokeStyle = 'rgba(100,120,150,0.22)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.35);
   ctx.lineWidth = 1.1;
   ctx.setLineDash([4, 6]);
   ctx.lineCap = 'round';
@@ -354,13 +434,13 @@ function drawGasCorridors(ctx: CanvasRenderingContext2D): void {
   ctx.restore();
 }
 
-// ─── Pipes (3-pass bloom, HSL palette, pressure-scaled width) ────────────
+// ─── Pipes (3-pass bloom, token palette, pressure-scaled width) ──────────
 
 /**
  * Render every pipe in three stacked strokes (wide blurred, medium
- * blurred, sharp core) so they read as glowing neon. Hue is driven by
- * pressure via the shared palette, so low-pressure pipes are red-orange
- * and high-pressure ones shift toward bright white-cyan. Midpoint
+ * blurred, sharp core). Color is driven by pressure via the design system,
+ * so low-pressure pipes rust toward starvation and healthy ones glow amber.
+ * Midpoint
  * arrow indicates flow direction for pipes with meaningful throughput.
  */
 function drawPipes(ctx: CanvasRenderingContext2D): void {
@@ -370,7 +450,7 @@ function drawPipes(ctx: CanvasRenderingContext2D): void {
 
     const pressureRatio = Math.max(0, Math.min(1, pipe.pressure / MAX_PRESSURE));
     const flowRatio = Math.min(1, Math.abs(pipe.flow) / pipe.maxFlow);
-    const hsl = pipeColorHsl(pressureRatio);
+    const pipeColor = pressureColor(pressureRatio);
 
     const baseWidth = 2 + pressureRatio * 2; // 2..4 px at full pressure
 
@@ -378,9 +458,9 @@ function drawPipes(ctx: CanvasRenderingContext2D): void {
     ctx.lineCap = 'round';
 
     // Pass 1: wide outer glow
-    ctx.shadowColor = hslString(hsl, 0.45 + pressureRatio * 0.3);
-    ctx.shadowBlur = 20;
-    ctx.strokeStyle = hslString(hsl, 0.12);
+    ctx.shadowColor = pressureColor(pressureRatio, 0.35 + pressureRatio * 0.35);
+    ctx.shadowBlur = 10 + pressureRatio * 10;
+    ctx.strokeStyle = pressureColor(pressureRatio, 0.12);
     ctx.lineWidth = baseWidth + 6;
     ctx.beginPath();
     ctx.moveTo(c1[0], c1[1]);
@@ -389,7 +469,7 @@ function drawPipes(ctx: CanvasRenderingContext2D): void {
 
     // Pass 2: medium glow
     ctx.shadowBlur = 8;
-    ctx.strokeStyle = hslString(hsl, 0.4);
+    ctx.strokeStyle = pressureColor(pressureRatio, 0.4);
     ctx.lineWidth = baseWidth + 2;
     ctx.beginPath();
     ctx.moveTo(c1[0], c1[1]);
@@ -398,8 +478,7 @@ function drawPipes(ctx: CanvasRenderingContext2D): void {
 
     // Pass 3: sharp core
     ctx.shadowBlur = 0;
-    const coreHsl = { h: hsl.h, s: hsl.s, l: Math.min(92, hsl.l + 18) };
-    ctx.strokeStyle = hslString(coreHsl, 0.95);
+    ctx.strokeStyle = pipeColor;
     ctx.lineWidth = baseWidth;
     ctx.beginPath();
     ctx.moveTo(c1[0], c1[1]);
@@ -416,7 +495,7 @@ function drawPipes(ctx: CanvasRenderingContext2D): void {
       ctx.save();
       ctx.translate(mx, my);
       ctx.rotate(angle * dir);
-      ctx.fillStyle = hslString(coreHsl, 0.75);
+      ctx.fillStyle = pressureColor(pressureRatio, 0.75);
       ctx.beginPath();
       ctx.moveTo(6 + flowRatio * 2, 0);
       ctx.lineTo(-3, -3);
@@ -441,17 +520,16 @@ function drawJunctions(ctx: CanvasRenderingContext2D): void {
     if (rs.pipeConnections < 3) continue;
     const c = rp.region.centroid;
     const pressureRatio = Math.max(0, Math.min(1, rs.pressure / MAX_PRESSURE));
-    const hsl = pipeColorHsl(pressureRatio);
     const pulse = 0.6 + 0.4 * Math.sin(render.animPhase * 2.5);
     ctx.save();
-    ctx.shadowColor = hslString(hsl, 0.7);
+    ctx.shadowColor = pressureColor(pressureRatio, 0.7);
     ctx.shadowBlur = 18;
-    ctx.fillStyle = hslString(hsl, 0.25 * pulse);
+    ctx.fillStyle = pressureColor(pressureRatio, 0.25 * pulse);
     ctx.beginPath();
     ctx.arc(c.x, c.y, 8 + pulse * 3, 0, Math.PI * 2);
     ctx.fill();
     ctx.shadowBlur = 0;
-    ctx.fillStyle = hslString({ ...hsl, l: Math.min(95, hsl.l + 25) }, 0.85 * pulse);
+    ctx.fillStyle = pressureColor(pressureRatio, 0.85 * pulse);
     ctx.beginPath();
     ctx.arc(c.x, c.y, 2.5, 0, Math.PI * 2);
     ctx.fill();
@@ -477,7 +555,7 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
   const endY = snapped ? getCenter(mapView.hoveredRegion!)[1] : input.my;
 
   ctx.save();
-  ctx.strokeStyle = snapped ? 'rgba(6,214,160,0.85)' : 'rgba(6,214,160,0.45)';
+  ctx.strokeStyle = snapped ? withAlpha(COLOR.AMBER_BASE, 0.85) : withAlpha(COLOR.AMBER_BASE, 0.45);
   ctx.lineWidth = snapped ? 2.5 : 2;
   ctx.setLineDash([8, 4]);
   ctx.beginPath();
@@ -488,14 +566,14 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
 
   // Snap target ring on the hovered centroid
   if (snapped) {
-    ctx.strokeStyle = 'rgba(6,214,160,0.85)';
+    ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.85);
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.arc(endX, endY, 12, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.shadowColor = 'rgba(6,214,160,0.6)';
+    ctx.shadowColor = withAlpha(COLOR.AMBER_BASE, 0.6);
     ctx.shadowBlur = 10;
-    ctx.fillStyle = 'rgba(6,214,160,0.9)';
+    ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.9);
     ctx.beginPath();
     ctx.arc(endX, endY, 3.5, 0, Math.PI * 2);
     ctx.fill();
@@ -505,7 +583,7 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
   // Pulsing ring at the start
   const pulse = 0.6 + 0.4 * Math.sin(render.animPhase * 4);
   ctx.save();
-  ctx.strokeStyle = `rgba(6,214,160,${0.4 + pulse * 0.4})`;
+  ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.4 + pulse * 0.4);
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.arc(start[0], start[1], 10 + pulse * 4, 0, Math.PI * 2);
@@ -523,10 +601,10 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
 
     const mx = (start[0] + endX) / 2;
     const my = (start[1] + endY) / 2;
-    ctx.font = '11px Courier New';
-    ctx.fillStyle = 'rgba(6,214,160,0.95)';
+    ctx.font = canvasFont('11px', 'mono');
+    ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.95);
     ctx.textAlign = 'center';
-    ctx.fillText(`${Math.round(dist)}km — €${fmtMoney(cost)}`, mx, my - 8);
+    ctx.fillText(`${Math.round(dist)} km — € ${fmtMoney(cost)}`, mx, my - 8);
   }
 }
 
@@ -544,17 +622,17 @@ function drawBuildings(ctx: CanvasRenderingContext2D): void {
     const cfg = BUILDINGS[b.type];
 
     // Per-plant palette
-    let genColor = '#ffffff';
-    let genGlow = 'rgba(255,255,255,0.1)';
+    let genColor: string = COLOR.TYPE_PRIMARY;
+    let genGlow: string = withAlpha(COLOR.TYPE_PRIMARY, 0.1);
     if (b.type === 'solarPlant') {
-      genColor = '#fbbf24';
-      genGlow = b.production > 0 ? 'rgba(251,191,36,0.4)' : 'rgba(251,191,36,0.1)';
+      genColor = COLOR.AMBER_BRIGHT;
+      genGlow = b.production > 0 ? withAlpha(COLOR.AMBER_BRIGHT, 0.4) : withAlpha(COLOR.AMBER_BRIGHT, 0.1);
     } else if (b.type === 'windPlant') {
-      genColor = '#e2e8f0';
-      genGlow = b.production > 0 ? 'rgba(226,232,240,0.3)' : 'rgba(226,232,240,0.1)';
+      genColor = COLOR.TYPE_PRIMARY;
+      genGlow = b.production > 0 ? withAlpha(COLOR.TYPE_PRIMARY, 0.3) : withAlpha(COLOR.TYPE_PRIMARY, 0.1);
     } else if (b.type === 'nuclearPlant') {
-      genColor = '#a78bfa';
-      genGlow = 'rgba(167,139,250,0.3)';
+      genColor = COLOR.AMBER_BASE;
+      genGlow = withAlpha(COLOR.AMBER_BASE, 0.3);
     }
 
     ctx.save();
@@ -565,18 +643,14 @@ function drawBuildings(ctx: CanvasRenderingContext2D): void {
       ctx.shadowColor = genGlow;
       ctx.shadowBlur = 8;
     }
-    ctx.fillStyle = genColor;
-    ctx.font = '14px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(cfg.icon, -8, 0);
+    drawIcon(ctx, cfg.icon, -8, 0, 17, genColor);
     ctx.shadowBlur = 0;
 
     // Electrolyzer bracket (right half). Ring + internal dot hinting at
     // an electrolyzer stack. Bright when producing, dim when idle.
-    const elGlow = b.production > 0 ? 'rgba(6,214,160,0.55)' : 'rgba(6,214,160,0.18)';
+    const elGlow = b.production > 0 ? withAlpha(COLOR.AMBER_BASE, 0.55) : withAlpha(COLOR.AMBER_BASE, 0.18);
     ctx.strokeStyle = elGlow;
-    ctx.fillStyle = b.production > 0 ? 'rgba(6,214,160,0.8)' : 'rgba(6,214,160,0.28)';
+    ctx.fillStyle = b.production > 0 ? withAlpha(COLOR.AMBER_BASE, 0.8) : withAlpha(COLOR.AMBER_BASE, 0.28);
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.arc(8, 0, 5, 0, Math.PI * 2);
@@ -591,8 +665,8 @@ function drawBuildings(ctx: CanvasRenderingContext2D): void {
     if (b.production > 0) {
       const phase = (render.animPhase * 1.6 + (b.id * 0.17)) % 1; // 0..1
       const px = -6 + phase * 12;
-      ctx.fillStyle = 'rgba(255,220,120,0.9)';
-      ctx.shadowColor = 'rgba(255,220,120,0.8)';
+      ctx.fillStyle = withAlpha(COLOR.AMBER_GLOW, 0.9);
+      ctx.shadowColor = withAlpha(COLOR.AMBER_GLOW, 0.8);
       ctx.shadowBlur = 6;
       ctx.beginPath();
       ctx.arc(px, 0, 1.6, 0, Math.PI * 2);
@@ -601,8 +675,8 @@ function drawBuildings(ctx: CanvasRenderingContext2D): void {
     }
 
     // H₂ output tick on the right edge, glows when producing.
-    ctx.fillStyle = b.production > 0 ? 'rgba(6,214,160,0.9)' : 'rgba(6,214,160,0.3)';
-    ctx.font = '7px sans-serif';
+    ctx.fillStyle = b.production > 0 ? withAlpha(COLOR.AMBER_BASE, 0.9) : withAlpha(COLOR.AMBER_BASE, 0.3);
+    ctx.font = canvasFont('7px', 'mono', 'MEDIUM');
     ctx.textAlign = 'left';
     ctx.fillText('H₂', 14, 0);
     ctx.restore();
@@ -635,21 +709,17 @@ function drawSaltCaverns(ctx: CanvasRenderingContext2D): void {
     }
     ctx.closePath();
 
-    ctx.fillStyle = connected ? 'rgba(91, 33, 182, 0.22)' : 'rgba(71, 85, 105, 0.18)';
+    ctx.fillStyle = connected ? withAlpha(COLOR.TEAL_DIM, 0.22) : withAlpha(COLOR.SURFACE_BORDER, 0.18);
     ctx.fill();
-    ctx.strokeStyle = connected ? 'rgba(196, 181, 253, 0.95)' : 'rgba(148, 163, 184, 0.8)';
+    ctx.strokeStyle = connected ? withAlpha(COLOR.TEAL_BRIGHT, 0.95) : withAlpha(COLOR.TYPE_SECONDARY, 0.8);
     ctx.lineWidth = 1.4;
     ctx.stroke();
 
     if (connected) {
-      ctx.shadowColor = 'rgba(196, 181, 253, 0.55)';
+      ctx.shadowColor = withAlpha(COLOR.TEAL_BRIGHT, 0.55);
       ctx.shadowBlur = 10;
     }
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = connected ? '#ddd6fe' : '#cbd5e1';
-    ctx.fillText('🧂', 0, 0);
+    drawIcon(ctx, 'saltCavern', 0, 0, 16, connected ? COLOR.TEAL_BRIGHT : COLOR.TYPE_SECONDARY);
     ctx.restore();
   }
 }
@@ -672,19 +742,169 @@ function drawCustomers(ctx: CanvasRenderingContext2D): void {
     const pulse = 0.8 + Math.sin(render.animPhase * 3 + c.id) * 0.2;
     ctx.beginPath();
     ctx.arc(0, 0, 10, 0, Math.PI * 2);
-    ctx.fillStyle = cfg.color + '30';
+    ctx.fillStyle = withAlpha(cfg.color, 0.18);
     ctx.fill();
-    ctx.strokeStyle = cfg.color + (c.satisfaction > 0.5 ? '80' : '40');
+    ctx.strokeStyle = withAlpha(cfg.color, c.satisfaction > 0.5 ? 0.5 : 0.25);
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.font = '11px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = cfg.color;
     ctx.globalAlpha = pulse;
-    ctx.fillText(cfg.icon, 0, 0);
+    drawIcon(ctx, cfg.icon, 0, 0, 14, cfg.color);
     ctx.restore();
   }
+}
+
+// ─── Map furniture: reticle, scale, compass ──────────────────────────────
+
+function drawMapFurniture(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  drawCoordinateReticle(ctx);
+  drawScaleBar(ctx);
+  drawCompassRose(ctx, w, h);
+}
+
+function screenPoint(lon: number, lat: number): { x: number; y: number } {
+  return applyFit(lambertProject(lon, lat), mapView.fitTransform);
+}
+
+function drawCoordinateReticle(ctx: CanvasRenderingContext2D): void {
+  const left = mapView.mapX;
+  const top = mapView.mapY;
+  const bottom = mapView.mapY + mapView.mapH;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(left, top, mapView.mapW, mapView.mapH);
+  ctx.clip();
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.2);
+  ctx.lineWidth = 0.5;
+  ctx.setLineDash([2, 8]);
+
+  for (let lon = -4; lon <= 10; lon += 2) {
+    ctx.beginPath();
+    let first = true;
+    for (let lat = 41; lat <= 52; lat += 0.5) {
+      const p = screenPoint(lon, lat);
+      if (first) { ctx.moveTo(p.x, p.y); first = false; }
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  for (let lat = 42; lat <= 52; lat += 2) {
+    ctx.beginPath();
+    let first = true;
+    for (let lon = -6; lon <= 11; lon += 0.5) {
+      const p = screenPoint(lon, lat);
+      if (first) { ctx.moveTo(p.x, p.y); first = false; }
+      else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.72);
+  ctx.font = canvasFont('9px', 'mono', 'MEDIUM');
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  for (let lat = 42; lat <= 52; lat += 2) {
+    const p = screenPoint(-5, lat);
+    if (p.y < top || p.y > bottom) continue;
+    ctx.fillText(`${lat}°N`, left + 6, p.y);
+  }
+  ctx.restore();
+}
+
+function drawScaleBar(ctx: CanvasRenderingContext2D): void {
+  const lengthKm = 100;
+  const barW = lengthKm / mapView.kmPerPx;
+  const x = mapView.mapX + 20;
+  const y = mapView.mapY + mapView.mapH - 24;
+
+  ctx.save();
+  ctx.strokeStyle = withAlpha(COLOR.TYPE_SECONDARY, 0.75);
+  ctx.fillStyle = withAlpha(COLOR.TYPE_SECONDARY, 0.8);
+  ctx.lineWidth = 1;
+  ctx.font = canvasFont('10px', 'mono', 'MEDIUM');
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + barW, y);
+  ctx.moveTo(x, y - 4);
+  ctx.lineTo(x, y + 4);
+  ctx.moveTo(x + barW, y - 4);
+  ctx.lineTo(x + barW, y + 4);
+  ctx.stroke();
+  ctx.fillText(`0    ${lengthKm} km`, x, y + 12);
+  ctx.restore();
+}
+
+function drawCompassRose(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const x = Math.min(w - 52, mapView.mapX + mapView.mapW - 36);
+  const y = Math.min(h - 52, Math.max(mapView.mapY + 34, 82));
+
+  ctx.save();
+  ctx.strokeStyle = withAlpha(COLOR.TYPE_SECONDARY, 0.7);
+  ctx.fillStyle = withAlpha(COLOR.TYPE_SECONDARY, 0.85);
+  ctx.lineWidth = 1;
+  ctx.font = canvasFont('10px', 'mono', 'MEDIUM');
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.beginPath();
+  ctx.moveTo(x, y + 14);
+  ctx.lineTo(x, y - 14);
+  ctx.moveTo(x - 5, y - 8);
+  ctx.lineTo(x, y - 14);
+  ctx.lineTo(x + 5, y - 8);
+  ctx.stroke();
+  ctx.strokeStyle = COLOR.AMBER_BASE;
+  ctx.beginPath();
+  ctx.moveTo(x, y - 14);
+  ctx.lineTo(x, y - 22);
+  ctx.stroke();
+  ctx.fillText('N', x, y - 30);
+  ctx.restore();
+}
+
+// ─── Surface texture overlay ─────────────────────────────────────────────
+
+function ensureNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (noisePattern) return noisePattern;
+  if (!noiseImage) {
+    noiseImage = new Image();
+    noiseImage.onload = () => { noiseReady = true; };
+    noiseImage.src = generateNoiseDataURL();
+    return null;
+  }
+  if (!noiseReady) return null;
+  noisePattern = ctx.createPattern(noiseImage, 'repeat');
+  return noisePattern;
+}
+
+function drawTextureOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  ctx.save();
+
+  const vignette = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.18, w / 2, h / 2, Math.max(w, h) * 0.72);
+  vignette.addColorStop(0, withAlpha(COLOR.SURFACE_DEEP, 0));
+  vignette.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, TEXTURE.VIGNETTE_ALPHA));
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
+
+  ctx.fillStyle = withAlpha(COLOR.TYPE_PRIMARY, TEXTURE.SCANLINE_ALPHA);
+  for (let y = 0; y < h; y += TEXTURE.SCANLINE_SPACING) {
+    ctx.fillRect(0, y, w, 1);
+  }
+
+  const pattern = ensureNoisePattern(ctx);
+  if (pattern) {
+    ctx.globalAlpha = TEXTURE.NOISE_ALPHA;
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = pattern;
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  ctx.restore();
 }
 
 // (Canvas hover tooltip and sparkline replaced by DOM tooltip + in-canvas

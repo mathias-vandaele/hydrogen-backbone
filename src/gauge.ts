@@ -1,4 +1,4 @@
-import { hslString, pipeColorHsl } from './config';
+import { COLOR, canvasFont, pressureColor, withAlpha } from './design-system';
 
 // Canvas-rendered circular pressure gauge. Ticks + glowing arc + needle.
 // Arc sweeps from 225° (lower-left) clockwise to -45° (lower-right) — i.e.
@@ -35,18 +35,18 @@ export function drawGauge(
 ): void {
   const range = max - min;
   const t = range > 0 ? (value - min) / range : 0;
-  const hsl = pipeColorHsl(Math.max(0, Math.min(1, t)));
+  const pressureRatio = Math.max(0, Math.min(1, t));
 
   ctx.save();
 
   // Background disc
-  ctx.fillStyle = 'rgba(10,14,23,0.85)';
+  ctx.fillStyle = withAlpha(COLOR.SURFACE_DEEP, 0.85);
   ctx.beginPath();
   ctx.arc(cx, cy, radius, 0, Math.PI * 2);
   ctx.fill();
 
   // Faint full arc underlay
-  ctx.strokeStyle = 'rgba(30,58,95,0.55)';
+  ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.55);
   ctx.lineWidth = 6;
   ctx.lineCap = 'round';
   ctx.beginPath();
@@ -55,9 +55,9 @@ export function drawGauge(
 
   // Active arc (pressure fill)
   ctx.save();
-  ctx.shadowColor = hslString(hsl, 0.85);
+  ctx.shadowColor = pressureColor(pressureRatio, 0.85);
   ctx.shadowBlur = 14;
-  ctx.strokeStyle = hslString(hsl, 0.95);
+  ctx.strokeStyle = pressureColor(pressureRatio, 0.95);
   ctx.lineWidth = 6;
   ctx.lineCap = 'round';
   ctx.beginPath();
@@ -74,7 +74,7 @@ export function drawGauge(
     const a = angleFor(tt);
     const major = i % 5 === 0;
     const inner = major ? majorInner : minorInner;
-    ctx.strokeStyle = major ? 'rgba(224,231,255,0.75)' : 'rgba(100,116,139,0.5)';
+    ctx.strokeStyle = major ? withAlpha(COLOR.TYPE_PRIMARY, 0.75) : withAlpha(COLOR.TYPE_TERTIARY, 0.5);
     ctx.lineWidth = major ? 1.3 : 0.7;
     ctx.beginPath();
     ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
@@ -83,8 +83,8 @@ export function drawGauge(
   }
 
   // Numeric scale labels at major ticks (0, 25, 50, 75, 100%)
-  ctx.fillStyle = 'rgba(100,116,139,0.75)';
-  ctx.font = '9px Courier New';
+  ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.75);
+  ctx.font = canvasFont('9px', 'mono');
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   const labelRadius = radius - 22;
@@ -98,8 +98,8 @@ export function drawGauge(
   // Needle
   const needleAngle = angleFor(t);
   ctx.save();
-  ctx.strokeStyle = hslString(hsl, 0.98);
-  ctx.shadowColor = hslString(hsl, 0.8);
+  ctx.strokeStyle = pressureColor(pressureRatio, 0.98);
+  ctx.shadowColor = pressureColor(pressureRatio, 0.8);
   ctx.shadowBlur = 8;
   ctx.lineCap = 'round';
   ctx.lineWidth = 2.2;
@@ -110,8 +110,8 @@ export function drawGauge(
   ctx.restore();
 
   // Hub
-  ctx.fillStyle = 'rgba(13,20,33,1)';
-  ctx.strokeStyle = hslString(hsl, 0.9);
+  ctx.fillStyle = COLOR.SURFACE_BASE;
+  ctx.strokeStyle = pressureColor(pressureRatio, 0.9);
   ctx.lineWidth = 1.2;
   ctx.beginPath();
   ctx.arc(cx, cy, 4, 0, Math.PI * 2);
@@ -119,15 +119,15 @@ export function drawGauge(
   ctx.stroke();
 
   // Value readout (centered lower)
-  ctx.fillStyle = hslString(hsl, 1);
-  ctx.font = 'bold 22px Courier New';
+  ctx.fillStyle = pressureColor(pressureRatio);
+  ctx.font = canvasFont('22px', 'mono', 'BOLD');
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(value.toFixed(1), cx, cy + radius * 0.35);
 
   // Label + unit
-  ctx.fillStyle = 'rgba(100,116,139,0.9)';
-  ctx.font = '9px Courier New';
+  ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.9);
+  ctx.font = canvasFont('9px', 'mono');
   ctx.fillText(label.toUpperCase(), cx, cy - radius * 0.5);
   ctx.fillText('BAR', cx, cy + radius * 0.55);
 

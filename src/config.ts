@@ -7,6 +7,7 @@ import type {
   Insight,
   RegionConfig
 } from './types';
+import { COLOR } from './design-system';
 
 export const TICKS_PER_SEC = 24;
 export const TICKS_PER_DAY = 24;
@@ -79,13 +80,6 @@ export const OPEX_ANNUAL_FRACTION = {
   NUCLEAR_PLANT: 0.025  // 2.5%/yr of CAPEX
 };
 
-// Baseline alkaline electrolyzer efficiency, LHV basis. PEM sits at 60-68%;
-// SOEC approaches 80% but is not yet mass-deployed. 70% is a defensible
-// 2024 benchmark. Runtime production reads the live value from research.ts;
-// this constant is the tier-0 baseline only.
-// Source: Fraunhofer ISE hydrogen cost studies.
-export const ELECTROLYZER_EFFICIENCY = 0.70;
-
 // 33.3 kWh/kg (LHV of H₂) / 0.70 = 47.6 kWh/kg → rounded to 50.
 // Formula: h2_kg_per_day = MW × 24 × 1000 × ELECTROLYZER_EFFICIENCY / KWH_PER_KG_H2
 export const KWH_PER_KG_H2 = 50;
@@ -134,7 +128,7 @@ export const BIG_TIER_CAP = 6;
 export const BUILDINGS: BuildingsConfigMap = {
   solarPlant: {
     name: 'Solar Hydrogen Plant',
-    icon: '☀️',
+    icon: 'solarPlant',
     kind: 'solar',
     capacity: NAMEPLATE_MW.SOLAR_HYDROGEN_PLANT,
     baseCost: CAPEX.SOLAR_HYDROGEN_PLANT,
@@ -144,7 +138,7 @@ export const BUILDINGS: BuildingsConfigMap = {
   },
   windPlant: {
     name: 'Wind Hydrogen Plant',
-    icon: '💨',
+    icon: 'windPlant',
     kind: 'wind',
     capacity: NAMEPLATE_MW.WIND_HYDROGEN_PLANT,
     baseCost: CAPEX.WIND_HYDROGEN_PLANT,
@@ -154,7 +148,7 @@ export const BUILDINGS: BuildingsConfigMap = {
   },
   nuclearPlant: {
     name: 'Nuclear Hydrogen Plant',
-    icon: '⚛️',
+    icon: 'nuclearPlant',
     kind: 'nuclear',
     capacity: NAMEPLATE_MW.NUCLEAR_HYDROGEN_PLANT,
     baseCost: CAPEX.NUCLEAR_HYDROGEN_PLANT,
@@ -164,7 +158,7 @@ export const BUILDINGS: BuildingsConfigMap = {
   },
   saltCavern: {
     name: 'Salt Cavern',
-    icon: '🧂',
+    icon: 'saltCavern',
     baseCost: 360_000_000,
     volumeM3: 2_000_000,
     storageKg: 15_000_000,
@@ -173,7 +167,7 @@ export const BUILDINGS: BuildingsConfigMap = {
   },
   pipeline: {
     name: 'Pipeline',
-    icon: '🔗',
+    icon: 'pipeline',
     baseCostPerKm: 180_000,
     maxFlow: 80_000,
     linepackPerKm: 50,
@@ -202,7 +196,7 @@ function makeCustomerTier(
   archetype: CustomerArchetype,
   tier: CustomerTier,
   label: string,
-  icon: string,
+  icon: CustomerTypeConfig['icon'],
   color: string,
   slotKind: CustomerTypeConfig['slotKind'],
   demandMin: number,
@@ -230,29 +224,29 @@ function makeCustomerTier(
 }
 
 export const CUSTOMER_TYPES: Record<CustomerType, CustomerTypeConfig> = {
-  steel_small: makeCustomerTier('steel', 'small', 'Steel Fabricator', '🏭', '#ef4444', 'industrial', 8_000, 25_000, 6.5, '"A small steelworks can switch long before a flagship DRI complex does."'),
-  steel_mid: makeCustomerTier('steel', 'mid', 'Steel Mill', '🏭', '#ef4444', 'industrial', 25_000, 80_000, 5.8, '"Mid-scale steel plants move when hydrogen is credible at industrial volume."'),
-  steel_big: makeCustomerTier('steel', 'big', 'Steel DRI Plant', '🏭', '#ef4444', 'industrial', 80_000, 250_000, 5.0, '"A single DRI plant consumes roughly 70,000 tonnes of H₂ per year. Connect it to the pipe."'),
+  steel_small: makeCustomerTier('steel', 'small', 'Steel Fabricator', 'steelPlant', COLOR.AMBER_BASE, 'industrial', 8_000, 25_000, 6.5, '"A small steelworks can switch long before a flagship DRI complex does."'),
+  steel_mid: makeCustomerTier('steel', 'mid', 'Steel Mill', 'steelPlant', COLOR.AMBER_BASE, 'industrial', 25_000, 80_000, 5.8, '"Mid-scale steel plants move when hydrogen is credible at industrial volume."'),
+  steel_big: makeCustomerTier('steel', 'big', 'Steel DRI Plant', 'steelPlant', COLOR.AMBER_BRIGHT, 'industrial', 80_000, 250_000, 5.0, '"A single DRI plant consumes roughly 70,000 tonnes of H₂ per year. Connect it to the pipe."'),
 
-  ammonia_small: makeCustomerTier('ammonia', 'small', 'Fertilizer Blending Plant', '🧪', '#8b5cf6', 'industrial', 5_000, 15_000, 6.0, '"Smaller ammonia users pay for reliability before mega-plants do."'),
-  ammonia_mid: makeCustomerTier('ammonia', 'mid', 'Ammonia Plant', '🧪', '#8b5cf6', 'industrial', 15_000, 50_000, 5.4, '"Mid-scale Haber-Bosch capacity follows once hydrogen is consistently available."'),
-  ammonia_big: makeCustomerTier('ammonia', 'big', 'Ammonia Factory', '🧪', '#8b5cf6', 'industrial', 50_000, 180_000, 4.8, '"The Haber-Bosch process consumes 1.8% of global energy, almost all from grey hydrogen."'),
+  ammonia_small: makeCustomerTier('ammonia', 'small', 'Fertilizer Blending Plant', 'ammoniaPlant', COLOR.AMBER_DIM, 'industrial', 5_000, 15_000, 6.0, '"Smaller ammonia users pay for reliability before mega-plants do."'),
+  ammonia_mid: makeCustomerTier('ammonia', 'mid', 'Ammonia Plant', 'ammoniaPlant', COLOR.AMBER_BASE, 'industrial', 15_000, 50_000, 5.4, '"Mid-scale Haber-Bosch capacity follows once hydrogen is consistently available."'),
+  ammonia_big: makeCustomerTier('ammonia', 'big', 'Ammonia Factory', 'ammoniaPlant', COLOR.AMBER_BRIGHT, 'industrial', 50_000, 180_000, 4.8, '"The Haber-Bosch process consumes 1.8% of global energy, almost all from grey hydrogen."'),
 
-  efuel_small: makeCustomerTier('efuel', 'small', 'Synthetic Fuel Pilot', '⛽', '#f59e0b', 'efuel', 3_000, 30_000, 5.5, '"Small e-fuel pilots prove the process before refinery-scale capital arrives."', { pressureRelief: true }),
-  efuel_mid: makeCustomerTier('efuel', 'mid', 'E-Fuel Plant', '⛽', '#f59e0b', 'efuel', 30_000, 100_000, 4.9, '"A regional e-fuel plant soaks up surplus only when the pipe can really feed it."', { pressureRelief: true }),
-  efuel_big: makeCustomerTier('efuel', 'big', 'E-Fuel Refinery', '⛽', '#f59e0b', 'efuel', 100_000, 350_000, 4.3, '"E-fuel refineries only pencil out when hydrogen is abundant enough to look structural."', { pressureRelief: true }),
+  efuel_small: makeCustomerTier('efuel', 'small', 'Synthetic Fuel Pilot', 'efuelRefinery', COLOR.AMBER_DIM, 'efuel', 3_000, 30_000, 5.5, '"Small e-fuel pilots prove the process before refinery-scale capital arrives."', { pressureRelief: true }),
+  efuel_mid: makeCustomerTier('efuel', 'mid', 'E-Fuel Plant', 'efuelRefinery', COLOR.AMBER_BASE, 'efuel', 30_000, 100_000, 4.9, '"A regional e-fuel plant soaks up surplus only when the pipe can really feed it."', { pressureRelief: true }),
+  efuel_big: makeCustomerTier('efuel', 'big', 'E-Fuel Refinery', 'efuelRefinery', COLOR.AMBER_BRIGHT, 'efuel', 100_000, 350_000, 4.3, '"E-fuel refineries only pencil out when hydrogen is abundant enough to look structural."', { pressureRelief: true }),
 
-  chemical_small: makeCustomerTier('chemical', 'small', 'Specialty Chemical Works', '⚗️', '#3b82f6', 'industrial', 2_000, 12_000, 5.0, '"Specialty chemicals are often the first industrial molecules to switch."'),
-  chemical_mid: makeCustomerTier('chemical', 'mid', 'Chemical Plant', '⚗️', '#3b82f6', 'industrial', 12_000, 40_000, 4.5, '"Chemical demand scales in layers, not all at once."'),
-  chemical_big: makeCustomerTier('chemical', 'big', 'Integrated Chemical Complex', '⚗️', '#3b82f6', 'industrial', 40_000, 120_000, 4.0, '"The entire petrochemical value chain has hydrogen-fed alternatives."'),
+  chemical_small: makeCustomerTier('chemical', 'small', 'Specialty Chemical Works', 'chemicalPlant', COLOR.AMBER_DIM, 'industrial', 2_000, 12_000, 5.0, '"Specialty chemicals are often the first industrial molecules to switch."'),
+  chemical_mid: makeCustomerTier('chemical', 'mid', 'Chemical Plant', 'chemicalPlant', COLOR.AMBER_BASE, 'industrial', 12_000, 40_000, 4.5, '"Chemical demand scales in layers, not all at once."'),
+  chemical_big: makeCustomerTier('chemical', 'big', 'Integrated Chemical Complex', 'chemicalPlant', COLOR.AMBER_BRIGHT, 'industrial', 40_000, 120_000, 4.0, '"The entire petrochemical value chain has hydrogen-fed alternatives."'),
 
-  fuelcell_small: makeCustomerTier('fuelcell', 'small', 'Fuel Cell Depot', '🔋', '#06d6a0', 'distributed', 500, 3_000, 4.5, '"Small fuel-cell loads appear where the network already feels dependable."'),
-  fuelcell_mid: makeCustomerTier('fuelcell', 'mid', 'Fuel Cell Station', '🔋', '#06d6a0', 'distributed', 3_000, 15_000, 4.0, '"Municipal fuel-cell projects arrive once hydrogen supply looks routine."'),
-  fuelcell_big: makeCustomerTier('fuelcell', 'big', 'Dispatchable Fuel Cell Hub', '🔋', '#06d6a0', 'distributed', 15_000, 50_000, 3.5, '"A municipality installs a fuel cell. It now has a dispatchable local power plant with no emissions."'),
+  fuelcell_small: makeCustomerTier('fuelcell', 'small', 'Fuel Cell Depot', 'fuelCellStation', COLOR.TEAL_DIM, 'distributed', 500, 3_000, 4.5, '"Small fuel-cell loads appear where the network already feels dependable."'),
+  fuelcell_mid: makeCustomerTier('fuelcell', 'mid', 'Fuel Cell Station', 'fuelCellStation', COLOR.TEAL_BASE, 'distributed', 3_000, 15_000, 4.0, '"Municipal fuel-cell projects arrive once hydrogen supply looks routine."'),
+  fuelcell_big: makeCustomerTier('fuelcell', 'big', 'Dispatchable Fuel Cell Hub', 'fuelCellStation', COLOR.TEAL_BRIGHT, 'distributed', 15_000, 50_000, 3.5, '"A municipality installs a fuel cell. It now has a dispatchable local power plant with no emissions."'),
 
-  export_small: makeCustomerTier('export', 'small', 'Coastal Bunkering Node', '🚢', '#06b6d4', 'port', 15_000, 60_000, 4.0, '"Portside hydrogen starts with bunkering and early offtake, not mega-terminals."', { minPipeConnections: 2, requiresPort: true }),
-  export_mid: makeCustomerTier('export', 'mid', 'Export Hub', '🚢', '#06b6d4', 'port', 60_000, 200_000, 3.5, '"Regional export hubs move only after domestic supply looks comfortably overbuilt."', { minPipeConnections: 2, requiresPort: true }),
-  export_big: makeCustomerTier('export', 'big', 'Export Terminal', '🚢', '#06b6d4', 'port', 200_000, 600_000, 3.0, '"France\'s port infrastructure is positioned for e-fuel export to global shipping and aviation markets."', { minPipeConnections: 2, requiresPort: true })
+  export_small: makeCustomerTier('export', 'small', 'Coastal Bunkering Node', 'exportTerminal', COLOR.TEAL_DIM, 'port', 15_000, 60_000, 4.0, '"Portside hydrogen starts with bunkering and early offtake, not mega-terminals."', { minPipeConnections: 2, requiresPort: true }),
+  export_mid: makeCustomerTier('export', 'mid', 'Export Hub', 'exportTerminal', COLOR.TEAL_BASE, 'port', 60_000, 200_000, 3.5, '"Regional export hubs move only after domestic supply looks comfortably overbuilt."', { minPipeConnections: 2, requiresPort: true }),
+  export_big: makeCustomerTier('export', 'big', 'Export Terminal', 'exportTerminal', COLOR.TEAL_BRIGHT, 'port', 200_000, 600_000, 3.0, '"France\'s port infrastructure is positioned for e-fuel export to global shipping and aviation markets."', { minPipeConnections: 2, requiresPort: true })
 };
 
 // Slot distribution roughly tracks industryDemand, population, port status,
@@ -277,7 +271,7 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.60, windBase: 1.00, nuclearBonus: 1.3, industryDemand: 1.4,
     hasPort: true, portName: 'Dunkirk/Calais',
     gasInfra: 0.8, maxSlots: 12,
-    color: '#1a2535',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 2, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
@@ -285,25 +279,25 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Strasbourg',
     solarBase: 0.70, windBase: 0.90, nuclearBonus: 1.4, industryDemand: 1.2,
     hasPort: false, gasInfra: 0.7, maxSlots: 14,
-    color: '#1a2840',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 2, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
-    id: 'normandie', code: '28', name: 'Normandy', abbr: 'NOR',
+    id: 'normandie', code: '28', name: 'Normandie', abbr: 'NOR',
     capital: 'Rouen',
     solarBase: 0.60, windBase: 1.00, nuclearBonus: 1.2, industryDemand: 0.9,
     hasPort: true, portName: 'Le Havre/Rouen',
     gasInfra: 0.6, maxSlots: 10,
-    color: '#152535',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
-    id: 'bretagne', code: '53', name: 'Brittany', abbr: 'BRE',
+    id: 'bretagne', code: '53', name: 'Bretagne', abbr: 'BRE',
     capital: 'Rennes',
     solarBase: 0.60, windBase: 1.00, nuclearBonus: 0.0, industryDemand: 0.6,
     hasPort: true, portName: 'Brest',
     gasInfra: 0.4, maxSlots: 8,
-    color: '#12253a',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   },
   {
@@ -311,7 +305,7 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Paris',
     solarBase: 0.70, windBase: 0.60, nuclearBonus: 0.3, industryDemand: 1.5,
     hasPort: false, gasInfra: 0.9, maxSlots: 8,
-    color: '#1e2845',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 2, portSlots: 0, efuelSlots: 0
   },
   {
@@ -319,7 +313,7 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Orléans',
     solarBase: 0.80, windBase: 0.70, nuclearBonus: 1.3, industryDemand: 0.7,
     hasPort: false, gasInfra: 0.5, maxSlots: 12,
-    color: '#162535',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
@@ -328,7 +322,7 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.75, windBase: 0.90, nuclearBonus: 0.5, industryDemand: 0.7,
     hasPort: true, portName: 'Nantes-Saint-Nazaire',
     gasInfra: 0.5, maxSlots: 10,
-    color: '#142530',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 0
   },
   {
@@ -336,7 +330,7 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Dijon',
     solarBase: 0.75, windBase: 0.70, nuclearBonus: 0.8, industryDemand: 0.8,
     hasPort: false, gasInfra: 0.6, maxSlots: 12,
-    color: '#182840',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 0, portSlots: 0, efuelSlots: 0
   },
   {
@@ -345,7 +339,7 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 0.90, windBase: 0.75, nuclearBonus: 0.8, industryDemand: 0.8,
     hasPort: true, portName: 'Bordeaux/La Rochelle',
     gasInfra: 0.7, maxSlots: 16,
-    color: '#152030',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
@@ -353,7 +347,7 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Lyon',
     solarBase: 0.80, windBase: 0.60, nuclearBonus: 1.5, industryDemand: 1.3,
     hasPort: false, gasInfra: 0.8, maxSlots: 14,
-    color: '#1a2840',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
@@ -361,7 +355,7 @@ export const REGIONS: RegionConfig[] = [
     capital: 'Toulouse',
     solarBase: 1.00, windBase: 0.75, nuclearBonus: 0.6, industryDemand: 0.9,
     hasPort: false, gasInfra: 0.6, maxSlots: 14,
-    color: '#1a2030',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
@@ -370,16 +364,16 @@ export const REGIONS: RegionConfig[] = [
     solarBase: 1.00, windBase: 0.60, nuclearBonus: 0.7, industryDemand: 1.0,
     hasPort: true, portName: 'Marseille-Fos',
     gasInfra: 0.7, maxSlots: 12,
-    color: '#1e2535',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
-    id: 'corse', code: '94', name: 'Corsica', abbr: 'COR',
+    id: 'corse', code: '94', name: 'Corse', abbr: 'COR',
     capital: 'Ajaccio',
     solarBase: 1.00, windBase: 0.85, nuclearBonus: 0.0, industryDemand: 0.3,
     hasPort: true, portName: 'Ajaccio/Bastia',
     gasInfra: 0.1, maxSlots: 4,
-    color: '#182535',
+    color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   }
 ];
@@ -396,47 +390,6 @@ export const GAS_CORRIDORS: GasCorridor[] = [
   { name: 'Fos → Montpellier → Perpignan',  waypoints: [[5.0,43.44],[3.88,43.61],[2.89,42.70]] },
   { name: 'Bordeaux → Bayonne',             waypoints: [[-0.58,44.84],[-1.17,43.69],[-1.47,43.49]] }
 ];
-
-// Pressure-to-color palette for the pipe network. HSL stops interpolated by
-// pressure ratio. At 0: dim red-orange; at 1: bright white-cyan.
-export interface HSL { h: number; s: number; l: number; }
-export const PIPE_PALETTE: Array<{ t: number; hsl: HSL }> = [
-  { t: 0.00, hsl: { h:  15, s: 70, l: 35 } }, // dim red-orange
-  { t: 0.35, hsl: { h:  35, s: 85, l: 50 } }, // amber
-  { t: 0.65, hsl: { h: 175, s: 80, l: 55 } }, // cyan
-  { t: 1.00, hsl: { h: 180, s: 95, l: 85 } }  // bright white-cyan
-];
-
-/**
- * Interpolate the pipe color palette for a normalized 0..1 pressure ratio.
- * Returns an HSL triplet; use {@link hslString} to render as an alpha-aware
- * CSS string. Clamped to [0,1] to keep the palette stable at extremes.
- */
-export function pipeColorHsl(pressureRatio: number): HSL {
-  const t = Math.max(0, Math.min(1, pressureRatio));
-  for (let i = 0; i < PIPE_PALETTE.length - 1; i++) {
-    const a = PIPE_PALETTE[i];
-    const b = PIPE_PALETTE[i + 1];
-    if (t >= a.t && t <= b.t) {
-      const k = (t - a.t) / (b.t - a.t);
-      return {
-        h: a.hsl.h + (b.hsl.h - a.hsl.h) * k,
-        s: a.hsl.s + (b.hsl.s - a.hsl.s) * k,
-        l: a.hsl.l + (b.hsl.l - a.hsl.l) * k
-      };
-    }
-  }
-  return PIPE_PALETTE[PIPE_PALETTE.length - 1].hsl;
-}
-
-/**
- * Format an HSL color as a CSS `hsla()` string with the given alpha. Kept
- * here (rather than in a render module) so sim/data code can share a
- * palette without importing rendering concerns.
- */
-export function hslString(c: HSL, alpha = 1): string {
-  return `hsla(${c.h.toFixed(1)}, ${c.s.toFixed(1)}%, ${c.l.toFixed(1)}%, ${alpha})`;
-}
 
 const REGIONS_BY_CODE = new Map(REGIONS.map(r => [r.code, r]));
 

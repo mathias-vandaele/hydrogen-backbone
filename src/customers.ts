@@ -156,7 +156,7 @@ function materializeCustomer(type: CustomerType, regionId: string, demand: numbe
   playCustomer();
   playChaChing();
   triggerRegionFlash(regionId);
-  showToast(`${cfg.icon} New ${cfg.name} in ${rc.name}!`);
+  showToast(`New ${cfg.name} in ${rc.name}.`);
 }
 
 export function updateCustomers(): void {

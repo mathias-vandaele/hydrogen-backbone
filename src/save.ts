@@ -27,7 +27,7 @@ export function saveGame(): void {
   try {
     state.lastSavedAt = Date.now();
     localStorage.setItem(KEY, JSON.stringify(state));
-    showToast('Saved ✓');
+    showToast('Saved.');
     updateSaveTimestamp();
   } catch {
     showToast('Save failed!');

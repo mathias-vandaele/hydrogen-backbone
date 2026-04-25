@@ -163,7 +163,7 @@ export function buildPipeline(fromId: string, toId: string): void {
   const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount);
 
   if (state.money < cost) {
-    showToast(`Not enough money! Need €${fmtMoney(cost)}`);
+    showToast(`Not enough money! Need € ${fmtMoney(cost)}`);
     return;
   }
 
@@ -186,7 +186,7 @@ export function buildPipeline(fromId: string, toId: string): void {
   state.regions[toId].pipeConnections = (state.regions[toId].pipeConnections || 0) + 1;
 
   playBuild();
-  showToast(`Pipeline: ${fromCfg.name} → ${toCfg.name} (${Math.round(dist)}km, €${fmtMoney(cost)})`);
+  showToast(`Pipeline: ${fromCfg.name} → ${toCfg.name} (${Math.round(dist)} km, € ${fmtMoney(cost)})`);
   updateBuildCosts();
 }
 

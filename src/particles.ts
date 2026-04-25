@@ -1,4 +1,5 @@
-import { MAX_PRESSURE, hslString, pipeColorHsl } from './config';
+import { MAX_PRESSURE } from './config';
+import { COLOR, pressureColor, withAlpha } from './design-system';
 import { getCenter } from './map';
 import { state } from './state';
 
@@ -139,10 +140,9 @@ export function drawParticles(ctx: CanvasRenderingContext2D): void {
     const p = pool[i];
     if (!p.active) continue;
 
-    const hsl = pipeColorHsl(p.pressureRatio);
     ctx.beginPath();
     ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-    ctx.fillStyle = hslString(hsl, p.alpha * 0.75);
+    ctx.fillStyle = pressureColor(p.pressureRatio, p.alpha * 0.75);
     ctx.fill();
   }
 }
@@ -170,8 +170,8 @@ const MAX_PULSES = 64;
 
 /**
  * Emit a pressure pulse outward from `regionId` along every pipe it
- * touches. Caller supplies whether this is an injection (green, from an
- * electrolyzer adding H₂) or a withdraw (amber, from a customer consuming).
+ * touches. Caller supplies whether this is an injection (from an
+ * electrolyzer adding H₂) or a withdraw (from a customer consuming).
  * Hard-capped at MAX_PULSES to avoid visual spam.
  */
 export function spawnPressurePulse(regionId: string, kind: 'inject' | 'withdraw', intensity = 1): void {
@@ -205,8 +205,7 @@ function updatePulses(dtFactor: number): void {
 
 /**
  * Render every active pulse as a glowing disc advancing along its pipe,
- * with radius and alpha both dropping as it ages. Fill color is branded
- * by pulse kind (inject = cyan-green, withdraw = amber).
+ * with radius and alpha both dropping as it ages.
  */
 function drawPulses(ctx: CanvasRenderingContext2D): void {
   const s = state;
@@ -222,14 +221,14 @@ function drawPulses(ctx: CanvasRenderingContext2D): void {
 
     const fade = 1 - pulse.progress;
     const radius = 6 + (1 - pulse.progress) * 10;
-    const hsl = pulse.kind === 'inject'
-      ? { h: 160, s: 90, l: 75 }
-      : { h:  30, s: 90, l: 70 };
+    const color = pulse.kind === 'inject' ? COLOR.AMBER_GLOW : COLOR.AMBER_DIM;
 
     ctx.save();
-    ctx.shadowColor = hslString(hsl, fade * 0.8);
+    ctx.shadowColor = pressureColor(pipe.pressure / MAX_PRESSURE, fade * 0.8);
     ctx.shadowBlur = 18;
-    ctx.fillStyle = hslString(hsl, fade * 0.5 * pulse.intensity);
+    ctx.fillStyle = pulse.kind === 'inject'
+      ? pressureColor(pipe.pressure / MAX_PRESSURE, fade * 0.5 * pulse.intensity)
+      : withAlpha(color, fade * 0.5 * pulse.intensity);
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
