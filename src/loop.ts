@@ -2,16 +2,20 @@ import { updateFinancialAudio } from './audio';
 import { drawFrame } from './renderer';
 import { state } from './state';
 import { tick } from './sim';
-import { computeRunwayDays, updateHUD } from './ui';
+import { computeCapitalCoverageDays, updateHUD } from './ui';
 
 // Fixed sim timestep: one sim tick every 100 ms of wall time at 1× speed
 // (10 Hz). Rendering is always rAF-driven so visuals stay smooth regardless
 // of sim speed. State.speed multiplies wall time: 10× = 10 sim ticks per
 // 100 ms of wall time.
 const SIM_INTERVAL = 100;
+const RENDER_INTERVAL = 1000 / 60;
+const HUD_INTERVAL = 1000 / 15;
 
 let lastTime = 0;
 let simAccum = 0;
+let lastRenderTime = 0;
+let lastHudTime = 0;
 
 /**
  * One animation frame: accumulate wall-time into simAccum, drain it in
@@ -33,14 +37,19 @@ function frame(timestamp: number): void {
     if (simAccum > SIM_INTERVAL * 10) simAccum = 0;
   }
 
-  drawFrame(timestamp);
+  if (lastRenderTime === 0 || timestamp - lastRenderTime >= RENDER_INTERVAL) {
+    drawFrame(timestamp);
+    lastRenderTime = timestamp;
+  }
 
   // UI refresh throttled to ~15 fps; DOM updates are the expensive part.
-  if (timestamp % 4 < 2) updateHUD();
+  if (timestamp - lastHudTime >= HUD_INTERVAL) {
+    updateHUD();
+    lastHudTime = timestamp;
+  }
 
-  // v4: financial-stress heartbeat. Always called (cheap no-op when runway
-  // is comfortable) so the player feels tension as soon as burn bites.
-  updateFinancialAudio(computeRunwayDays());
+  // Financial-stress heartbeat. Cheap no-op while capital coverage is healthy.
+  updateFinancialAudio(computeCapitalCoverageDays());
 
   requestAnimationFrame(frame);
 }
@@ -51,5 +60,7 @@ function frame(timestamp: number): void {
  */
 export function startLoop(): void {
   lastTime = performance.now();
+  lastRenderTime = 0;
+  lastHudTime = 0;
   requestAnimationFrame(frame);
 }

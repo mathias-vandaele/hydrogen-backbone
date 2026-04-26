@@ -22,6 +22,31 @@ const render = {
 let noiseImage: HTMLImageElement | null = null;
 let noisePattern: CanvasPattern | null = null;
 let noiseReady = false;
+let textureOverlayCanvas: HTMLCanvasElement | null = null;
+let textureOverlayKey = '';
+
+const REGION_LABEL_BREAKS: Record<string, string[]> = {
+  'Auvergne-Rhône-Alpes': ['Auvergne-Rhône', 'Alpes'],
+  'Bourgogne-Franche-Comté': ['Bourgogne', 'Franche-Comté'],
+  'Centre-Val de Loire': ['Centre-Val', 'de Loire'],
+  'Nouvelle-Aquitaine': ['Nouvelle', 'Aquitaine'],
+  "Provence-Alpes-Côte d'Azur": ['Provence-Alpes', "Côte d'Azur"]
+};
+
+interface RegionLabelLayout {
+  lines: string[];
+  lineHeight: number;
+  font: string;
+}
+
+interface CoordinateReticleCache {
+  key: string;
+  path: Path2D;
+  labels: Array<{ text: string; y: number }>;
+}
+
+const regionLabelLayouts = new Map<string, RegionLabelLayout>();
+let coordinateReticleCache: CoordinateReticleCache | null = null;
 
 /**
  * Render one frame. Back-to-front order matters: backdrop, seasonal
@@ -304,6 +329,7 @@ function drawGrid(ctx: CanvasRenderingContext2D): void {
 function drawRegions(ctx: CanvasRenderingContext2D): void {
   ctx.lineJoin = 'round';
   ctx.lineCap = 'round';
+  const activeCustomersByRegion = countActiveCustomersByRegion();
 
   for (const rp of mapView.regionPaths) {
     const rs = state.regions[rp.id];
@@ -334,7 +360,7 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
 
     // Slot fill brighten (Priority 4): each customer in this region adds a
     // warm glow; a fully-saturated region visibly lights up at night.
-    const fill = slotFillRatio(rp.id);
+    const fill = slotFillRatio(rp.id, activeCustomersByRegion);
     if (fill > 0) {
       ctx.fillStyle = withAlpha(COLOR.AMBER_BASE, 0.04 + 0.18 * fill);
       ctx.fill(rp.path);
@@ -342,14 +368,13 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
 
     const centroid = rp.region.centroid;
 
-    // Stroke
+    // Base stroke. Hover/selection strokes are drawn in a second pass below
+    // so neighboring regions cannot paint over shared borders.
     ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.85);
-    ctx.lineWidth = isSelected ? 3.2 : 2.4;
+    ctx.lineWidth = 2.4;
     ctx.stroke(rp.path);
-    ctx.strokeStyle = isSelected
-      ? COLOR.AMBER_BRIGHT
-      : isHovered ? withAlpha(COLOR.AMBER_BASE, 0.8) : withAlpha(COLOR.TYPE_TERTIARY, 0.7);
-    ctx.lineWidth = isSelected ? 1.6 : 0.9;
+    ctx.strokeStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.7);
+    ctx.lineWidth = 0.9;
     ctx.stroke(rp.path);
 
     // Region label + pressure bar
@@ -367,45 +392,93 @@ function drawRegions(ctx: CanvasRenderingContext2D): void {
       ctx.fillRect(bx, by, barW * pressureRatio, barH);
     }
   }
+
+  drawRegionFocusOutlines(ctx);
+}
+
+function drawRegionFocusOutlines(ctx: CanvasRenderingContext2D): void {
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  const hovered = mapView.regionPaths.find(rp => rp.id === mapView.hoveredRegion);
+  const selected = mapView.regionPaths.find(rp => rp.id === mapView.selectedRegion);
+
+  if (hovered && hovered !== selected) {
+    ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.85);
+    ctx.lineWidth = 2.8;
+    ctx.stroke(hovered.path);
+    ctx.strokeStyle = withAlpha(COLOR.AMBER_BASE, 0.8);
+    ctx.lineWidth = 1.1;
+    ctx.stroke(hovered.path);
+  }
+
+  if (selected) {
+    ctx.shadowColor = withAlpha(COLOR.AMBER_BRIGHT, 0.55);
+    ctx.shadowBlur = GLOW.SUBTLE.blur;
+    ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.88);
+    ctx.lineWidth = 4.2;
+    ctx.stroke(selected.path);
+    ctx.strokeStyle = COLOR.AMBER_BRIGHT;
+    ctx.lineWidth = 1.8;
+    ctx.stroke(selected.path);
+  }
+
+  ctx.restore();
 }
 
 function drawRegionLabel(ctx: CanvasRenderingContext2D, name: string, x: number, y: number, active: boolean): void {
-  const labelBreaks: Record<string, string[]> = {
-    'Auvergne-Rhône-Alpes': ['Auvergne-Rhône', 'Alpes'],
-    'Bourgogne-Franche-Comté': ['Bourgogne', 'Franche-Comté'],
-    'Centre-Val de Loire': ['Centre-Val', 'de Loire'],
-    'Nouvelle-Aquitaine': ['Nouvelle', 'Aquitaine'],
-    "Provence-Alpes-Côte d'Azur": ['Provence-Alpes', "Côte d'Azur"]
-  };
-  const lines = labelBreaks[name] ?? [name];
-  const longest = Math.max(...lines.map(line => line.length));
-  const lineHeight = longest > 17 ? 9 : 10;
+  const layout = getRegionLabelLayout(name);
 
   ctx.save();
-  ctx.font = canvasFont(longest > 17 ? '9px' : TYPE.SIZE.MICRO, 'mono', 'MEDIUM');
+  ctx.font = layout.font;
   ctx.fillStyle = active ? COLOR.AMBER_BASE : withAlpha(COLOR.TYPE_SECONDARY, 0.62);
   ctx.strokeStyle = withAlpha(COLOR.SURFACE_DEEP, 0.72);
   ctx.lineWidth = 3;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  lines.forEach((line, index) => {
-    const ly = y + (index - (lines.length - 1) / 2) * lineHeight;
+  layout.lines.forEach((line, index) => {
+    const ly = y + (index - (layout.lines.length - 1) / 2) * layout.lineHeight;
     ctx.strokeText(line, x, ly);
     ctx.fillText(line, x, ly);
   });
   ctx.restore();
 }
 
+function getRegionLabelLayout(name: string): RegionLabelLayout {
+  const cached = regionLabelLayouts.get(name);
+  if (cached) return cached;
+  const lines = REGION_LABEL_BREAKS[name] ?? [name];
+  let longest = 0;
+  for (const line of lines) longest = Math.max(longest, line.length);
+  const layout = {
+    lines,
+    lineHeight: longest > 17 ? 9 : 10,
+    font: canvasFont(longest > 17 ? '9px' : TYPE.SIZE.MICRO, 'mono', 'MEDIUM')
+  };
+  regionLabelLayouts.set(name, layout);
+  return layout;
+}
+
+function countActiveCustomersByRegion(): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const customer of state.customers) {
+    if (!customer.active) continue;
+    counts.set(customer.regionId, (counts.get(customer.regionId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * Returns the 0..1 occupancy of a region's customer slots (sum of all
  * slot kinds). Saturated regions visibly brighten in drawRegions.
  */
-function slotFillRatio(regionId: string): number {
+function slotFillRatio(regionId: string, activeCustomersByRegion: Map<string, number>): number {
   const rc = getRegionConfig(regionId);
   if (!rc) return 0;
   const cap = rc.industrialSlots + rc.distributedSlots + rc.portSlots + rc.efuelSlots;
   if (cap <= 0) return 0;
-  const live = state.customers.filter(c => c.active && c.regionId === regionId).length;
+  const live = activeCustomersByRegion.get(regionId) ?? 0;
   return Math.min(1, live / cap);
 }
 
@@ -593,11 +666,7 @@ function drawPipePreview(ctx: CanvasRenderingContext2D): void {
   if (snapped) {
     const dist = distanceBetween(input.pipeStart, mapView.hoveredRegion!);
     const cfg = BUILDINGS.pipeline;
-    const fromCfg = getRegionConfig(input.pipeStart);
-    const toCfg = getRegionConfig(mapView.hoveredRegion!);
-    if (!fromCfg || !toCfg) return;
-    const infraDiscount = 1.0 - (Math.min(fromCfg.gasInfra, toCfg.gasInfra) * 0.4);
-    const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount);
+    const cost = Math.round(cfg.baseCostPerKm * dist);
 
     const mx = (start[0] + endX) / 2;
     const my = (start[1] + endY) / 2;
@@ -769,6 +838,7 @@ function drawCoordinateReticle(ctx: CanvasRenderingContext2D): void {
   const left = mapView.mapX;
   const top = mapView.mapY;
   const bottom = mapView.mapY + mapView.mapH;
+  const reticle = getCoordinateReticle();
 
   ctx.save();
   ctx.beginPath();
@@ -777,29 +847,7 @@ function drawCoordinateReticle(ctx: CanvasRenderingContext2D): void {
   ctx.strokeStyle = withAlpha(COLOR.SURFACE_BORDER, 0.2);
   ctx.lineWidth = 0.5;
   ctx.setLineDash([2, 8]);
-
-  for (let lon = -4; lon <= 10; lon += 2) {
-    ctx.beginPath();
-    let first = true;
-    for (let lat = 41; lat <= 52; lat += 0.5) {
-      const p = screenPoint(lon, lat);
-      if (first) { ctx.moveTo(p.x, p.y); first = false; }
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-  }
-
-  for (let lat = 42; lat <= 52; lat += 2) {
-    ctx.beginPath();
-    let first = true;
-    for (let lon = -6; lon <= 11; lon += 0.5) {
-      const p = screenPoint(lon, lat);
-      if (first) { ctx.moveTo(p.x, p.y); first = false; }
-      else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-  }
-
+  ctx.stroke(reticle.path);
   ctx.restore();
 
   ctx.save();
@@ -807,12 +855,52 @@ function drawCoordinateReticle(ctx: CanvasRenderingContext2D): void {
   ctx.font = canvasFont('9px', 'mono', 'MEDIUM');
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  for (let lat = 42; lat <= 52; lat += 2) {
-    const p = screenPoint(-5, lat);
-    if (p.y < top || p.y > bottom) continue;
-    ctx.fillText(`${lat}°N`, left + 6, p.y);
+  for (const label of reticle.labels) {
+    if (label.y < top || label.y > bottom) continue;
+    ctx.fillText(label.text, left + 6, label.y);
   }
   ctx.restore();
+}
+
+function getCoordinateReticle(): CoordinateReticleCache {
+  const fit = mapView.fitTransform;
+  const key = [
+    mapView.mapX,
+    mapView.mapY,
+    mapView.mapW,
+    mapView.mapH,
+    fit.scale,
+    fit.tx,
+    fit.ty
+  ].join(':');
+  if (coordinateReticleCache?.key === key) return coordinateReticleCache;
+
+  const path = new Path2D();
+  for (let lon = -4; lon <= 10; lon += 2) {
+    let first = true;
+    for (let lat = 41; lat <= 52; lat += 0.5) {
+      const p = screenPoint(lon, lat);
+      if (first) { path.moveTo(p.x, p.y); first = false; }
+      else path.lineTo(p.x, p.y);
+    }
+  }
+
+  for (let lat = 42; lat <= 52; lat += 2) {
+    let first = true;
+    for (let lon = -6; lon <= 11; lon += 0.5) {
+      const p = screenPoint(lon, lat);
+      if (first) { path.moveTo(p.x, p.y); first = false; }
+      else path.lineTo(p.x, p.y);
+    }
+  }
+
+  const labels: CoordinateReticleCache['labels'] = [];
+  for (let lat = 42; lat <= 52; lat += 2) {
+    labels.push({ text: `${lat}°N`, y: screenPoint(-5, lat).y });
+  }
+
+  coordinateReticleCache = { key, path, labels };
+  return coordinateReticleCache;
 }
 
 function drawScaleBar(ctx: CanvasRenderingContext2D): void {
@@ -885,16 +973,8 @@ function ensureNoisePattern(ctx: CanvasRenderingContext2D): CanvasPattern | null
 function drawTextureOverlay(ctx: CanvasRenderingContext2D, w: number, h: number): void {
   ctx.save();
 
-  const vignette = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.18, w / 2, h / 2, Math.max(w, h) * 0.72);
-  vignette.addColorStop(0, withAlpha(COLOR.SURFACE_DEEP, 0));
-  vignette.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, TEXTURE.VIGNETTE_ALPHA));
-  ctx.fillStyle = vignette;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.fillStyle = withAlpha(COLOR.TYPE_PRIMARY, TEXTURE.SCANLINE_ALPHA);
-  for (let y = 0; y < h; y += TEXTURE.SCANLINE_SPACING) {
-    ctx.fillRect(0, y, w, 1);
-  }
+  const overlay = getTextureOverlay(w, h);
+  if (overlay) ctx.drawImage(overlay, 0, 0, w, h);
 
   const pattern = ensureNoisePattern(ctx);
   if (pattern) {
@@ -905,6 +985,34 @@ function drawTextureOverlay(ctx: CanvasRenderingContext2D, w: number, h: number)
   }
 
   ctx.restore();
+}
+
+function getTextureOverlay(w: number, h: number): HTMLCanvasElement | null {
+  const width = Math.max(1, Math.ceil(w));
+  const height = Math.max(1, Math.ceil(h));
+  const key = `${width}:${height}`;
+  if (textureOverlayCanvas && textureOverlayKey === key) return textureOverlayCanvas;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const vignette = ctx.createRadialGradient(width / 2, height / 2, Math.min(width, height) * 0.18, width / 2, height / 2, Math.max(width, height) * 0.72);
+  vignette.addColorStop(0, withAlpha(COLOR.SURFACE_DEEP, 0));
+  vignette.addColorStop(1, withAlpha(COLOR.SURFACE_DEEP, TEXTURE.VIGNETTE_ALPHA));
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = withAlpha(COLOR.TYPE_PRIMARY, TEXTURE.SCANLINE_ALPHA);
+  for (let y = 0; y < height; y += TEXTURE.SCANLINE_SPACING) {
+    ctx.fillRect(0, y, width, 1);
+  }
+
+  textureOverlayCanvas = canvas;
+  textureOverlayKey = key;
+  return textureOverlayCanvas;
 }
 
 // (Canvas hover tooltip and sparkline replaced by DOM tooltip + in-canvas

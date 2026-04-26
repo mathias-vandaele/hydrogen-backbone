@@ -13,7 +13,7 @@ import {
 } from './config';
 import { distanceBetween, getCenter } from './map';
 import { getCurrentPlantCapex, getElectrolyzerEfficiency } from './research';
-import { state } from './state';
+import { failIfCapitalDepleted, state } from './state';
 import { fmtMoney, showToast, updateBuildCosts } from './ui';
 import type {
   Building,
@@ -40,7 +40,8 @@ export function getCost(type: PlaceableBuildingType): number {
 /**
  * Predicate for "can the player place this building in this region right
  * now?" — checks budget, region slot capacity, and region-type suitability.
- * Nuclear plants need a nuclear-friendly site (`nuclearBonus ≥ 0.5`).
+ * Nuclear output is site-independent, so nuclear plants follow the same
+ * region slot rules as solar and wind plants.
  * Pipelines bypass this; they're validated in buildPipeline.
  */
 export function canBuild(type: BuildingType, regionId: string): boolean {
@@ -55,7 +56,6 @@ export function canBuild(type: BuildingType, regionId: string): boolean {
   }
   const count = state.buildings.filter(b => b.regionId === regionId).length;
   if (count >= rc.maxSlots) return false;
-  if (type === 'nuclearPlant' && rc.nuclearBonus < 0.5) return false;
   return true;
 }
 
@@ -106,6 +106,7 @@ export function build(type: BuildingType, regionId: string): void {
 
   playBuild();
   showToast(`${cfg.name} built in ${rc.name}!`);
+  failIfCapitalDepleted(state);
   updateBuildCosts();
 }
 
@@ -125,15 +126,14 @@ function buildSaltCavern(regionId: string): void {
   state.caverns.push(cavern);
   playBuild();
   showToast(`${cfg.name} built in ${rc.name} — network storage expanded.`);
+  failIfCapitalDepleted(state);
   updateBuildCosts();
 }
 
 /**
- * Place a pipeline between two regions. Cost is baseCostPerKm × distance,
- * discounted by the minimum of the two regions' gas-infra factors
- * (reusing old corridors is cheaper — the core "reuse what exists"
- * argument). Rejects duplicate connections. Updates both regions'
- * pipeConnections counters.
+ * Place a pipeline between two regions. Cost is baseCostPerKm × distance.
+ * Rejects duplicate connections. Updates both regions' pipeConnections
+ * counters.
  */
 export function buildPipeline(fromId: string, toId: string): void {
   const haveRootNetwork = state.pipes.length > 0;
@@ -159,8 +159,7 @@ export function buildPipeline(fromId: string, toId: string): void {
   const toCfg = getRegionConfig(toId);
   if (!fromCfg || !toCfg) return;
 
-  const infraDiscount = 1.0 - (Math.min(fromCfg.gasInfra, toCfg.gasInfra) * 0.4);
-  const cost = Math.round(cfg.baseCostPerKm * dist * infraDiscount);
+  const cost = Math.round(cfg.baseCostPerKm * dist);
 
   if (state.money < cost) {
     showToast(`Not enough money! Need € ${fmtMoney(cost)}`);
@@ -187,6 +186,7 @@ export function buildPipeline(fromId: string, toId: string): void {
 
   playBuild();
   showToast(`Pipeline: ${fromCfg.name} → ${toCfg.name} (${Math.round(dist)} km, € ${fmtMoney(cost)})`);
+  failIfCapitalDepleted(state);
   updateBuildCosts();
 }
 

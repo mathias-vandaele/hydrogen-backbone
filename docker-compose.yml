@@ -1,0 +1,19 @@
+services:
+  hydrogen-backbone:
+    build: .
+    image: hydrogen-backbone:latest
+    container_name: hydrogen-backbone
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.hydrogen-backbone.rule=Host(`hydrogen-backbone.mathias-vandaele.dev`)"
+      - "traefik.http.routers.hydrogen-backbone.entrypoints=websecure"
+      - "traefik.http.routers.hydrogen-backbone.tls=true"
+      - "traefik.http.routers.hydrogen-backbone.tls.certresolver=myresolver"
+      - "traefik.http.services.hydrogen-backbone.loadbalancer.server.port=80"
+    networks:
+      - traefik-public
+
+networks:
+  traefik-public:
+    external: true

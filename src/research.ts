@@ -19,7 +19,8 @@ import {
   PRESSURE_PRICE_MAX,
   PRESSURE_PRICE_MIN
 } from './config';
-import type { GameState, PlaceableBuildingType, ResearchTrackName } from './types';
+import { failIfCapitalDepleted } from './state';
+import type { BuildingType, GameState, PlaceableBuildingType, ResearchTrackName } from './types';
 
 /** Doubling cost ladder for Solar research: €100M → €1.6B. Total €3.1B. */
 export const SOLAR_RESEARCH_COSTS: readonly number[] = [
@@ -70,9 +71,19 @@ export const MAX_ELECTROLYZER_EFFICIENCY =
  * contracts linearly from `PRESSURE_PRICE_MIN`/`PRESSURE_PRICE_MAX`
  * (see `config.ts`) toward these values as tiers are purchased.
  */
-export const PRICE_BAND_MIN_TARGET = 1.0;
-export const PRICE_BAND_MAX_TARGET = 4.0;
+export const PRICE_BAND_MIN_TARGET = 0.5;
+export const PRICE_BAND_MAX_TARGET = 3.0;
 export const TOTAL_PRICE_BAND_TIERS = 4 * MAX_RESEARCH_TIER; // 20
+
+const TRACK_PLANT_REQUIREMENT_PER_TIER = 2;
+const ELECTROLYZER_PLANT_REQUIREMENT_PER_TIER = 4;
+
+export interface ResearchPrerequisite {
+  current: number;
+  required: number;
+  met: boolean;
+  label: string;
+}
 
 export function getResearchCosts(track: ResearchTrackName): readonly number[] {
   switch (track) {
@@ -88,6 +99,61 @@ export function getNextTierCost(s: GameState, track: ResearchTrackName): number 
   const tier = s.research[track].tier;
   if (tier >= MAX_RESEARCH_TIER) return null;
   return getResearchCosts(track)[tier];
+}
+
+export function getResearchPrerequisite(s: GameState, track: ResearchTrackName): ResearchPrerequisite {
+  const nextTier = Math.min(MAX_RESEARCH_TIER, s.research[track].tier + 1);
+  const required = getResearchRequiredPlantCount(track, nextTier);
+  const current = countResearchEligiblePlants(s, track);
+  return {
+    current,
+    required,
+    met: current >= required,
+    label: getResearchPrerequisiteLabel(track)
+  };
+}
+
+export function canBuyResearchTier(s: GameState, track: ResearchTrackName): boolean {
+  const cost = getNextTierCost(s, track);
+  if (cost === null) return false;
+  if (s.money < cost) return false;
+  return getResearchPrerequisite(s, track).met;
+}
+
+function getResearchRequiredPlantCount(track: ResearchTrackName, tier: number): number {
+  const perTier = track === 'electrolyzer'
+    ? ELECTROLYZER_PLANT_REQUIREMENT_PER_TIER
+    : TRACK_PLANT_REQUIREMENT_PER_TIER;
+  return perTier * tier;
+}
+
+function countResearchEligiblePlants(s: GameState, track: ResearchTrackName): number {
+  if (track === 'electrolyzer') {
+    return s.buildings.filter(b => isHydrogenPlantType(b.type)).length;
+  }
+  const type = getTrackPlantType(track);
+  return s.buildings.filter(b => b.type === type).length;
+}
+
+function getTrackPlantType(track: Exclude<ResearchTrackName, 'electrolyzer'>): PlaceableBuildingType {
+  switch (track) {
+    case 'solar': return 'solarPlant';
+    case 'wind': return 'windPlant';
+    case 'nuclear': return 'nuclearPlant';
+  }
+}
+
+function isHydrogenPlantType(type: BuildingType): boolean {
+  return type === 'solarPlant' || type === 'windPlant' || type === 'nuclearPlant';
+}
+
+function getResearchPrerequisiteLabel(track: ResearchTrackName): string {
+  switch (track) {
+    case 'solar': return 'solar hydrogen plants';
+    case 'wind': return 'wind hydrogen plants';
+    case 'nuclear': return 'nuclear hydrogen plants';
+    case 'electrolyzer': return 'hydrogen plants of any kind';
+  }
 }
 
 /** CAPEX multiplier (1.0 baseline → 0.5 at tier 5) for `track`. */
@@ -159,15 +225,17 @@ export function getCurrentPriceBand(s: GameState): { min: number; max: number } 
 /**
  * Attempt to purchase the next tier on `track`. Returns true on success
  * and atomically deducts the cost; returns false if the track is already
- * maxed or the player cannot afford it. Pure over GameState — no UI
- * side-effects here; callers handle toasts/sfx.
+ * maxed or the player cannot afford it. Mutates only GameState; callers
+ * handle toasts/sfx. Spending the last euro immediately ends the run.
  */
 export function buyResearchTier(s: GameState, track: ResearchTrackName): boolean {
   const cost = getNextTierCost(s, track);
   if (cost === null) return false;
   if (s.money < cost) return false;
+  if (!getResearchPrerequisite(s, track).met) return false;
   s.money -= cost;
   s.research[track].tier += 1;
+  failIfCapitalDepleted(s);
   return true;
 }
 

@@ -11,23 +11,28 @@ interface TutorialStep {
 const STEPS: TutorialStep[] = [
   {
     title: 'The Backbone',
-    text: 'Build France\'s hydrogen economy from the ground up. Prove that a molecular hydrogen backbone — a dumb pipe — is the missing protocol layer for the energy transition.\n\n"Build the pipe. The rest follows."',
+    text: 'France\'s energy transition needs more than electrons. Cheap renewable electricity solves only part of the problem — heavy industry, long-haul transport, and seasonal storage need molecules.\n\nYour job: build a national hydrogen backbone. A single dumb pipe carrying clean molecules from where they\'re produced to where they\'re needed.\n\n"Build the pipe. The rest follows."',
     btn: 'Begin'
   },
   {
-    title: 'Step 1: Build a Hydrogen Plant',
-    text: 'Click "Solar Hydrogen Plant" in the build menu, then place it in a sunny southern region like Occitanie or PACA. Solar electricity is converted to hydrogen *inside the plant* at 70% efficiency — only molecules leave the facility.\n\nSunlight -> internal electricity -> electrolysis -> H₂',
+    title: 'Plants produce molecules, not electrons',
+    text: 'Each Hydrogen Plant bundles a generator with an integrated electrolyzer. Sunlight, wind, or nuclear heat is converted to hydrogen *inside the facility* — only molecules leave.\n\nPlace your first plant in a region matching its strength: solar in the south, wind on the coast, nuclear anywhere with a grid connection.\n\nThe pipe carries molecules. The map carries the network. Electrons stay home.',
     btn: 'Next'
   },
   {
-    title: 'Step 2: Draw the Pipe',
-    text: 'Click "Pipeline", then click two regions to connect. The pipe carries hydrogen — not electricity — between regions. Line-packed pipe is the battery.\n\n"The pipe does not care who injects hydrogen or who withdraws it."',
+    title: 'The pipe is the battery',
+    text: 'Click Pipeline, then connect two regions. The backbone carries hydrogen between producers and consumers — and stores it via line-packing pressure when supply briefly exceeds demand.\n\nA dumb pipe. No central operator. No dispatch coordination. Producers inject, consumers withdraw, pressure absorbs the mismatch.\n\n"The pipe does not care who injects hydrogen or who withdraws it."',
     btn: 'Next'
   },
   {
-    title: 'Step 3: Watch the Price Descend',
-    text: 'As the backbone grows, price descends through a staircase of thresholds. Small customers commit first, then mids, then big anchor loads once the network can prove it has spare 24h supply to serve them.\n\nWatch price, pressure, and customer tiers together as the network scales.\n\nSpeed: 1×/2×/3× or 1/10/100. Space pauses.',
-    btn: 'Start Playing!'
+    title: 'Pressure is life',
+    text: 'Network pressure rises when production exceeds consumption, falls when consumption exceeds production. Watch it carefully.\n\nIf pressure drops to zero, the network has collapsed. Customers walk away. The game ends.\n\nKeep pressure healthy by building enough capacity to cover demand — including night, calm wind, and reactor refueling. Caverns help by storing surplus for shortage periods. The backbone only works if it stays pressurized.',
+    btn: 'Next'
+  },
+  {
+    title: 'Watch the staircase',
+    text: 'As your network grows and the price of hydrogen descends, customers commit in tiers. Small distributed users first. Mid-scale industrial buyers as supply becomes reliable. Major anchor loads — steel mills, ammonia plants, export terminals — only once the network can demonstrably serve them.\n\nResearch lowers CAPEX and improves efficiency. The price band tightens. New thresholds become reachable. The flywheel turns.\n\nSpace to pause. 1×/10×/100× to scale time.',
+    btn: 'Begin'
   }
 ];
 

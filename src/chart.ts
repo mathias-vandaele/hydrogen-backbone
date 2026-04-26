@@ -4,7 +4,7 @@
 // markers at each materialization point, and a dashed forward projection
 // that extrapolates 120 days from recent price momentum.
 
-import { CUSTOMER_TYPES, ECONOMY } from './config';
+import { CUSTOMER_TYPES } from './config';
 import { COLOR, canvasFont, withAlpha } from './design-system';
 import { drawIcon } from './icons';
 import { getCurrentPriceBand } from './research';
@@ -316,14 +316,12 @@ function drawCustomerMarkers(
   ctx.restore();
 }
 
-// ─── Budget history chart (v4, Priority 3) ───────────────────────────────
+// ─── Budget history chart ────────────────────────────────────────────────
 
 /**
- * Render the Budget history area chart: the player's cumulative budget
- * over the last N game days, with a red horizontal line at the
- * BANKRUPTCY_THRESHOLD so the player can see the ceiling of death
- * they must stay above. The line changes color dynamically — teal
- * when trending up, amber when flat, rust when trending down.
+ * Render the Budget history area chart over the last N game days. The
+ * line changes color dynamically — teal when trending up, amber when flat,
+ * rust when trending down.
  */
 export function drawBudgetChart(
   ctx: CanvasRenderingContext2D,
@@ -357,7 +355,7 @@ export function drawBudgetChart(
     return;
   }
 
-  const lo = Math.min(...history, ECONOMY.BANKRUPTCY_THRESHOLD);
+  const lo = Math.min(...history, 0);
   const hi = Math.max(...history, 0);
   const range = (hi - lo) || 1;
   const toY = (v: number) => innerY + innerH - ((v - lo) / range) * innerH;
@@ -372,19 +370,6 @@ export function drawBudgetChart(
   ctx.lineTo(innerX + innerW, toY(0));
   ctx.stroke();
   ctx.setLineDash([]);
-
-  // Bankruptcy threshold line — the "bottom of the pool".
-  ctx.strokeStyle = withAlpha(COLOR.RUST_BASE, 0.75);
-  ctx.lineWidth = 1.2;
-  ctx.beginPath();
-  ctx.moveTo(innerX, toY(ECONOMY.BANKRUPTCY_THRESHOLD));
-  ctx.lineTo(innerX + innerW, toY(ECONOMY.BANKRUPTCY_THRESHOLD));
-  ctx.stroke();
-  ctx.fillStyle = withAlpha(COLOR.RUST_BASE, 0.9);
-  ctx.font = canvasFont('9px', 'mono');
-  ctx.textAlign = 'right';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText('bankruptcy', innerX + innerW - 2, toY(ECONOMY.BANKRUPTCY_THRESHOLD) - 1);
 
   // Trend color based on recent slope
   const last = history[history.length - 1];

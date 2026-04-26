@@ -1,12 +1,14 @@
 import { applyOpex, logProductionDebugIfActive, updateProduction } from './buildings';
-import { ECONOMY, TICKS_PER_DAY } from './config';
-import { checkEmergence, updateCustomers } from './customers';
+import { TICKS_PER_DAY } from './config';
+import { areAllCustomerSlotsFilled, checkEmergence, updateCustomers } from './customers';
 import { sampleFinance, sampleSupplyDemand, updateEcon } from './econ';
 import { checkInsights } from './insights';
 import { solvePressure } from './pressure';
 import { autoSave } from './save';
-import { state } from './state';
+import { failIfCapitalDepleted, state, triggerGameOver } from './state';
 import { updateWeather } from './weather';
+
+const VISIBLE_ZERO_PRESSURE_BAR = 0.005;
 
 /**
  * Set simulation speed (1/10/100), or pass 0 to toggle pause. Called from
@@ -50,27 +52,28 @@ export function tick(): void {
 
   updateWeather();
   updateProduction();
+  const pressureBeforeSolve = s.networkPressure;
   solvePressure();
+  if (
+    !s.sandboxMode &&
+    s.pipes.length > 0 &&
+    pressureBeforeSolve >= VISIBLE_ZERO_PRESSURE_BAR &&
+    s.networkPressure < VISIBLE_ZERO_PRESSURE_BAR
+  ) {
+    triggerGameOver(s, 'pressureDepleted');
+    return;
+  }
   updateEcon();
   applyOpex();
+  if (failIfCapitalDepleted(s)) return;
   checkEmergence();
+  if (!s.sandboxMode && areAllCustomerSlotsFilled()) {
+    triggerGameOver(s, 'marketComplete');
+    return;
+  }
   updateCustomers();
   sampleSupplyDemand();
   sampleFinance();
-
-  // v4 bankruptcy watchdog: track consecutive days in the red; trigger
-  // game over after the grace period expires.
-  if (s.tick % TICKS_PER_DAY === 0) {
-    if (s.money < ECONOMY.BANKRUPTCY_THRESHOLD) {
-      s.daysBelowBankruptcyThreshold++;
-      if (s.daysBelowBankruptcyThreshold >= ECONOMY.BANKRUPTCY_GRACE_DAYS) {
-        s.gameOver = { triggered: true, reason: 'bankruptcy', day: s.gameDay };
-        s.paused = true;
-      }
-    } else {
-      s.daysBelowBankruptcyThreshold = 0;
-    }
-  }
 
   // Day-boundary bookkeeping: insights + autosave.
   if (s.tick % TICKS_PER_DAY === 0) {

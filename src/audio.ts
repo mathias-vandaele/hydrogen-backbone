@@ -7,9 +7,9 @@ interface AudioState {
   initialized: boolean;
   ambientGain: GainNode | null;
   ambientStarted: boolean;
-  /** Timestamp of last bankruptcy heartbeat beat (ms). */
+  /** Timestamp of last financial-stress heartbeat beat (ms). */
   lastHeartbeat: number;
-  /** Current beat interval — shortens as runway shrinks. */
+  /** Current beat interval — shortens as capital coverage shrinks. */
   heartbeatIntervalMs: number;
 }
 
@@ -256,7 +256,7 @@ export function playEscapeVelocity(): void {
   playBell(196, 0.16, 0.055, 2.0);
 }
 
-/** Muted, slightly-detuned "thud" — one beat of the bankruptcy heartbeat. */
+/** Muted, slightly-detuned "thud" — one beat of the financial-stress heartbeat. */
 function playHeartbeat(intensity: number): void {
   if (!audio.enabled || !audio.ctx) return;
   try {
@@ -280,28 +280,28 @@ function playHeartbeat(intensity: number): void {
 
 /**
  * Per-frame audio side-effects driven by the financial state. Called
- * from the main loop with the current runway (in game-days). Produces
- * a quiet, escalating heartbeat as runway shortens:
- *   - Runway > 60 days   → silent.
+ * from the main loop with the current capital coverage (in game-days).
+ * Produces a quiet, escalating heartbeat as capital coverage shortens:
+ *   - Coverage > 60 days → silent.
  *   - 60..30 days        → slow pulse (~2s interval).
  *   - 30..10 days        → medium pulse (~1s).
  *   - < 10 days          → fast pulse (~0.5s), louder.
  * The function is stateless at the caller's level; it tracks its own
  * last-beat timestamp and adjusts the interval on every call.
  */
-export function updateFinancialAudio(runwayDays: number): void {
+export function updateFinancialAudio(coverageDays: number): void {
   if (!audio.enabled || !audio.ctx) { audio.lastHeartbeat = 0; return; }
-  if (!Number.isFinite(runwayDays) || runwayDays >= 60) {
+  if (!Number.isFinite(coverageDays) || coverageDays >= 60) {
     audio.heartbeatIntervalMs = 0;
     return;
   }
-  // Map runway → interval. Below 10 days, fast; otherwise linearly.
+  // Map capital coverage to interval. Below 10 days, fast; otherwise linearly.
   let interval: number;
   let intensity: number;
-  if (runwayDays < 10) {
+  if (coverageDays < 10) {
     interval = 500;
     intensity = 1;
-  } else if (runwayDays < 30) {
+  } else if (coverageDays < 30) {
     interval = 1000;
     intensity = 0.7;
   } else {

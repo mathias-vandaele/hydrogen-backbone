@@ -4,6 +4,7 @@ import {
   BIG_TIER_CAP,
   CUSTOMER_SUPPLY_BUFFER_MULTIPLIER,
   CUSTOMER_TYPES,
+  EMERGENCE_DAILY_PROBABILITY_SCALE,
   EMERGENCE_LOGISTIC_CENTER,
   EMERGENCE_LOGISTIC_STEEPNESS,
   MAX_PRESSURE,
@@ -18,12 +19,18 @@ import { getCenter } from './map';
 import { triggerRegionFlash } from './renderer';
 import { state } from './state';
 import { showToast } from './ui';
-import type { CustomerTier, CustomerType, CustomerTypeConfig, SlotKind } from './types';
+import type { Customer, CustomerTier, CustomerType, CustomerTypeConfig, SlotKind } from './types';
 
 const TIER_CAPS: Record<CustomerTier, number> = {
   small: SMALL_TIER_CAP,
   mid: MID_TIER_CAP,
   big: BIG_TIER_CAP
+};
+
+const TIER_RANK: Record<CustomerTier, number> = {
+  small: 0,
+  mid: 1,
+  big: 2
 };
 
 export function checkEmergence(): void {
@@ -86,7 +93,8 @@ function evaluateType(
 function emergenceDailyProbability(priceRatio: number): number {
   if (state.networkPressure >= MAX_PRESSURE) return 1;
   if (priceRatio >= 1.0) return 0;
-  return 1 / (1 + Math.exp(EMERGENCE_LOGISTIC_STEEPNESS * (priceRatio - EMERGENCE_LOGISTIC_CENTER)));
+  const baseProbability = 1 / (1 + Math.exp(EMERGENCE_LOGISTIC_STEEPNESS * (priceRatio - EMERGENCE_LOGISTIC_CENTER)));
+  return baseProbability * EMERGENCE_DAILY_PROBABILITY_SCALE;
 }
 
 function getEligibleRegions(cfg: CustomerTypeConfig): string[] {
@@ -95,7 +103,7 @@ function getEligibleRegions(cfg: CustomerTypeConfig): string[] {
     const rs = state.regions[rc.id];
     if (rs.pipeConnections < cfg.minPipeConnections) continue;
     if (cfg.requiresPort && !rc.hasPort) continue;
-    if (!hasFreeSlot(rc.id, cfg.slotKind)) continue;
+    if (!canPlaceOrUpgradeCustomer(rc.id, cfg)) continue;
     out.push(rc.id);
   }
   return out;
@@ -106,7 +114,7 @@ function getEmergencePriorityOrder(): CustomerType[] {
   for (const type of Object.keys(CUSTOMER_TYPES) as CustomerType[]) {
     grouped[CUSTOMER_TYPES[type].tier].push(type);
   }
-  return (['small', 'mid', 'big'] as CustomerTier[]).flatMap(tier =>
+  return (['big', 'mid', 'small'] as CustomerTier[]).flatMap(tier =>
     grouped[tier].slice().sort(() => Math.random() - 0.5)
   );
 }
@@ -128,6 +136,28 @@ function slotCapacity(rc: ReturnType<typeof getRegionConfig> & object, kind: Slo
   }
 }
 
+function canPlaceOrUpgradeCustomer(regionId: string, cfg: CustomerTypeConfig): boolean {
+  return hasFreeSlot(regionId, cfg.slotKind) || getUpgradeCandidate(regionId, cfg) !== null;
+}
+
+function getUpgradeCandidate(regionId: string, cfg: CustomerTypeConfig): Customer | null {
+  const targetRank = TIER_RANK[cfg.tier];
+  if (targetRank <= TIER_RANK.small) return null;
+
+  let best: Customer | null = null;
+  let bestRank = -1;
+  for (const customer of state.customers) {
+    if (!customer.active || customer.regionId !== regionId) continue;
+    const existingCfg = CUSTOMER_TYPES[customer.type];
+    if (existingCfg.slotKind !== cfg.slotKind) continue;
+    const existingRank = TIER_RANK[existingCfg.tier];
+    if (existingRank >= targetRank || existingRank <= bestRank) continue;
+    best = customer;
+    bestRank = existingRank;
+  }
+  return best;
+}
+
 function materializeCustomer(type: CustomerType, regionId: string, demand: number): void {
   const s = state;
   const cfg = CUSTOMER_TYPES[type];
@@ -136,13 +166,35 @@ function materializeCustomer(type: CustomerType, regionId: string, demand: numbe
   const center = getCenter(regionId);
   const angle = Math.random() * Math.PI * 2;
   const radius = 20 + Math.random() * 25;
+  const roundedDemand = Math.round(demand);
+
+  if (!hasFreeSlot(regionId, cfg.slotKind)) {
+    const upgrade = getUpgradeCandidate(regionId, cfg);
+    if (!upgrade) return;
+    const previousName = upgrade.name;
+    upgrade.type = type;
+    upgrade.name = cfg.name;
+    upgrade.demand = roundedDemand;
+    upgrade.currentDemand = undefined;
+    upgrade.maxPrice = cfg.priceThreshold;
+    upgrade.satisfaction = 1.0;
+    upgrade.unsatisfiedDays = 0;
+    upgrade.appearedDay = s.gameDay;
+    upgrade.scale = 0;
+
+    playCustomer();
+    playChaChing();
+    triggerRegionFlash(regionId);
+    showToast(`${previousName} in ${rc.name} scaled into ${cfg.name}.`);
+    return;
+  }
 
   s.customers.push({
     id: s.nextCustomerId++,
     regionId,
     type,
     name: cfg.name,
-    demand: Math.round(demand),
+    demand: roundedDemand,
     maxPrice: cfg.priceThreshold,
     satisfaction: 1.0,
     x: center[0] + Math.cos(angle) * radius,
@@ -177,12 +229,30 @@ export function updateCustomers(): void {
 
 export function spawnCustomer(regionId: string, type: CustomerType, demand: number): void {
   const cfg = CUSTOMER_TYPES[type];
-  if (!hasFreeSlot(regionId, cfg.slotKind) || getReservedTierPopulation(cfg.tier) >= getTierCap(cfg.tier)) return;
+  if (!canPlaceOrUpgradeCustomer(regionId, cfg) || getReservedTierPopulation(cfg.tier) >= getTierCap(cfg.tier)) return;
   materializeCustomer(type, regionId, demand);
 }
 
 function getSlotOccupancy(regionId: string, kind: SlotKind): number {
   return state.customers.filter(c => c.active && c.regionId === regionId && CUSTOMER_TYPES[c.type].slotKind === kind).length;
+}
+
+export function getCustomerSlotSummary(): { occupied: number; total: number } {
+  let occupied = 0;
+  let total = 0;
+  const kinds: SlotKind[] = ['industrial', 'distributed', 'port', 'efuel'];
+  for (const rc of REGIONS) {
+    for (const kind of kinds) {
+      occupied += getSlotOccupancy(rc.id, kind);
+      total += slotCapacity(rc, kind);
+    }
+  }
+  return { occupied, total };
+}
+
+export function areAllCustomerSlotsFilled(): boolean {
+  const { occupied, total } = getCustomerSlotSummary();
+  return total > 0 && occupied >= total;
 }
 
 export function getCurrentTotalDemand(): number {

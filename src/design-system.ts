@@ -28,7 +28,7 @@ export const COLOR = {
   TEAL_BASE:        '#1EA896',
   TEAL_BRIGHT:      '#6EE2C9',
 
-  // Alert rust — curtailment, warnings, bankruptcy
+  // Alert rust — curtailment, warnings, failure states
   // Industrial oxidation, not fire-engine red
   RUST_DIM:         '#6B3020',
   RUST_BASE:        '#C84B31',
@@ -149,12 +149,19 @@ interface RGB {
   b: number;
 }
 
+const rgbCache = new Map<string, RGB>();
+
 function hexToRgb(hex: string): RGB {
-  const value = hex.replace('#', '');
+  const key = hex.toLowerCase();
+  const cached = rgbCache.get(key);
+  if (cached) return cached;
+  const value = key.replace('#', '');
   const r = Number.parseInt(value.slice(0, 2), 16);
   const g = Number.parseInt(value.slice(2, 4), 16);
   const b = Number.parseInt(value.slice(4, 6), 16);
-  return { r, g, b };
+  const rgb = { r, g, b };
+  rgbCache.set(key, rgb);
+  return rgb;
 }
 
 function blendColor(a: ColorValue, b: ColorValue, t: number): string {

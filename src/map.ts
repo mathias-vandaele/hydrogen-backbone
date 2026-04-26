@@ -56,6 +56,13 @@ export const mapView = {
 
 let rawRegions: RawRegion[] = [];
 
+// Retina and ProMotion displays can make a full-screen canvas unexpectedly
+// expensive: DPR 2 is four times the pixels of DPR 1 before refresh rate is
+// considered. Keep the backing buffer near a 1080p external display budget
+// while preserving the same CSS layout and input coordinates.
+const MAX_CANVAS_DPR = 1.5;
+const MAX_CANVAS_BACKING_PIXELS = 3_000_000;
+
 // Gas corridors: raw Lambert coords computed once; screen coords rebuilt on resize.
 interface RawCorridor { name: string; rawPts: Point[]; }
 let rawGasCorridors: RawCorridor[] = [];
@@ -70,7 +77,6 @@ function configToBonuses(c: RegionConfig): RegionBonuses {
   return {
     solar: c.solarBase,
     wind: c.windBase,
-    nuclear: c.nuclearBonus,
     industrial: c.industryDemand,
     port: c.hasPort ? 1 : 0,
     landCapacity: c.maxSlots
@@ -191,12 +197,12 @@ export function resizeMap(): void {
   const ctx = mapView.ctx;
   if (!canvas || !ctx) return;
 
-  const dpr = window.devicePixelRatio || 1;
-  mapView.dpr = dpr;
   mapView.width = window.innerWidth;
   mapView.height = window.innerHeight;
-  canvas.width = mapView.width * dpr;
-  canvas.height = mapView.height * dpr;
+  const dpr = getCanvasDpr(mapView.width, mapView.height);
+  mapView.dpr = dpr;
+  canvas.width = Math.max(1, Math.ceil(mapView.width * dpr));
+  canvas.height = Math.max(1, Math.ceil(mapView.height * dpr));
   canvas.style.width = `${mapView.width}px`;
   canvas.style.height = `${mapView.height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -218,6 +224,13 @@ export function resizeMap(): void {
   mapView.kmPerPx = 1 / (mapView.fitTransform.scale * 1000);
 
   rebuildPaths();
+}
+
+function getCanvasDpr(cssWidth: number, cssHeight: number): number {
+  const nativeDpr = window.devicePixelRatio || 1;
+  const cssPixels = Math.max(1, cssWidth * cssHeight);
+  const budgetDpr = Math.sqrt(MAX_CANVAS_BACKING_PIXELS / cssPixels);
+  return Math.max(1, Math.min(nativeDpr, MAX_CANVAS_DPR, budgetDpr));
 }
 
 function computeResponsiveMapRect(): { x: number; y: number; w: number; h: number } {

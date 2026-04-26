@@ -9,7 +9,7 @@ import {
   SMALL_TIER_CAP,
   getRegionConfig
 } from './config';
-import { getTierPopulationSummary } from './customers';
+import { getCustomerSlotSummary, getTierPopulationSummary } from './customers';
 import { $, $$, $maybe } from './dom';
 import {
   getRollingAverageDemand,
@@ -27,6 +27,7 @@ import {
   buyResearchTier,
   getElectrolyzerEfficiency,
   getNextTierCost,
+  getResearchPrerequisite,
   getTotalResearchTiers,
   MAX_RESEARCH_TIER
 } from './research';
@@ -35,12 +36,8 @@ import { createInitialState, replaceState, state } from './state';
 import { getSeason, getWeatherAt } from './weather';
 import type { BuildingType, Insight, ResearchTrackName } from './types';
 
-/**
- * v4 Runway: how many days of operation remain at the current burn rate.
- * Positive burn = losing money; negative burn = net profitable → ∞.
- * Return NaN for "effectively infinite" so callers can render it as ∞.
- */
-export function computeRunwayDays(): number {
+/** Days of operation covered by current capital at the current burn rate. */
+export function computeCapitalCoverageDays(): number {
   const burn = state.dailyOpex - state.dailyRevenue;
   if (burn <= 0) return Infinity;
   return state.money / burn;
@@ -55,31 +52,31 @@ function inlineIcon(icon: Parameters<typeof iconSvg>[0]): string {
 
 type SeasonName = ReturnType<typeof getSeason>;
 
-const FRENCH_MONTHS = [
-  'JANVIER',
-  'FÉVRIER',
-  'MARS',
-  'AVRIL',
-  'MAI',
-  'JUIN',
-  'JUILLET',
-  'AOÛT',
-  'SEPTEMBRE',
-  'OCTOBRE',
-  'NOVEMBRE',
-  'DÉCEMBRE'
+const ENGLISH_MONTHS = [
+  'JANUARY',
+  'FEBRUARY',
+  'MARCH',
+  'APRIL',
+  'MAY',
+  'JUNE',
+  'JULY',
+  'AUGUST',
+  'SEPTEMBER',
+  'OCTOBER',
+  'NOVEMBER',
+  'DECEMBER'
 ];
 
-const FRENCH_SEASONS: Record<SeasonName, string> = {
-  Winter: 'HIVER',
-  Spring: 'PRINTEMPS',
-  Summer: 'ÉTÉ',
-  Autumn: 'AUTOMNE'
+const ENGLISH_SEASONS: Record<SeasonName, string> = {
+  Winter: 'WINTER',
+  Spring: 'SPRING',
+  Summer: 'SUMMER',
+  Autumn: 'AUTUMN'
 };
 
-function formatFrenchDate(year: number, dayOfYear: number): string {
+function formatEnglishDate(year: number, dayOfYear: number): string {
   const currentDate = new Date(year, 0, dayOfYear);
-  return `${currentDate.getDate()} ${FRENCH_MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
+  return `${currentDate.getDate()} ${ENGLISH_MONTHS[currentDate.getMonth()]} ${currentDate.getFullYear()}`;
 }
 
 function formatCurrency(n: number): string {
@@ -88,6 +85,10 @@ function formatCurrency(n: number): string {
 
 function formatSignedCurrency(n: number): string {
   return `${n >= 0 ? '+€ ' : '-€ '}${fmtMoney(Math.abs(n))}`;
+}
+
+function formatPressure(n: number): string {
+  return `${n.toFixed(2)} bar`;
 }
 
 /**
@@ -113,8 +114,6 @@ export function initUI(): void {
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && $('#manifesto-popup').style.display === 'flex') closeManifesto();
   });
-  const researchToggle = $maybe('#research-toggle');
-  if (researchToggle) researchToggle.addEventListener('click', toggleResearchPanel);
   const researchCards = $maybe('#research-cards');
   if (researchCards) {
     researchCards.addEventListener('click', ev => {
@@ -133,9 +132,18 @@ export function initUI(): void {
   const gameoverNew = $maybe<HTMLButtonElement>('#gameover-newgame');
   if (gameoverNew) gameoverNew.addEventListener('click', () => {
     replaceState(createInitialState());
-    $('#gameover-screen').classList.remove('show');
+    $('#gameover-screen').classList.remove('show', 'end-win', 'end-loss');
     updateBuildCosts();
     showToast('New run started.');
+  });
+  const gameoverSandbox = $maybe<HTMLButtonElement>('#gameover-sandbox');
+  if (gameoverSandbox) gameoverSandbox.addEventListener('click', () => {
+    state.gameOver = null;
+    state.sandboxMode = true;
+    state.paused = false;
+    $('#gameover-screen').classList.remove('show', 'end-win', 'end-loss');
+    updateBuildCosts();
+    showToast('Sandbox mode enabled.');
   });
 }
 
@@ -158,7 +166,8 @@ function showBuildQuote(btn: HTMLButtonElement, type: BuildingType): void {
     const srcLabel = type === 'solarPlant' ? 'Sunlight'
                    : type === 'windPlant' ? 'Wind'
                    : 'Fission';
-    html += `<div class="flow-diagram">${inlineIcon(srcIcon)} ${srcLabel} <span class="flow-arrow">-></span> internal <span class="flow-arrow">-></span> ${inlineIcon('electrolyzer')} 70% <span class="flow-arrow">-></span> H₂ <em>to pipe</em></div>`;
+    const efficiency = (getElectrolyzerEfficiency(state) * 100).toFixed(0);
+    html += `<div class="flow-diagram">${inlineIcon(srcIcon)} ${srcLabel} <span class="flow-arrow">-></span> internal <span class="flow-arrow">-></span> ${inlineIcon('electrolyzer')} ${efficiency}% <span class="flow-arrow">-></span> H₂ <em>to pipe</em></div>`;
   }
   html += `<div class="quote-body">"${cfg.quote.replace(/^"|"$/g, '')}"</div>`;
   tip.innerHTML = html;
@@ -185,11 +194,10 @@ export function updateHUD(): void {
   updateResearchPanel();
   syncResearchAffordability();
 
-  // Budget now shown as signed — can go negative in v4. `warn` below € 30M,
-  // `danger` when negative.
+  // Budget warns below €30M and turns critical at zero.
   const moneyEl = $('#hud-money');
   moneyEl.textContent = formatCurrency(s.money);
-  moneyEl.className = `hud-value${s.money < 0 ? ' danger' : s.money < 30_000_000 ? ' warn' : ''}`;
+  moneyEl.className = `hud-value${s.money <= 0 ? ' danger' : s.money < 30_000_000 ? ' warn' : ''}`;
   $('#hud-price').textContent = `€ ${s.spotPrice.toFixed(2)}/kg`;
   $('#hud-produced').textContent = fmtTonnes(s.totalH2Produced);
   $('#hud-customers').textContent = String(s.customers.filter(c => c.active).length);
@@ -197,8 +205,8 @@ export function updateHUD(): void {
   // Date display follows the simulation's day-of-year so the visible
   // calendar stays aligned with weather and seasonality.
   const currentYear = 2025 + Math.floor((s.gameDay - 1) / 365);
-  $('#hud-day').textContent = formatFrenchDate(currentYear, s.dayOfYear);
-  $('#hud-season').textContent = FRENCH_SEASONS[getSeason(s.dayOfYear)];
+  $('#hud-day').textContent = formatEnglishDate(currentYear, s.dayOfYear);
+  $('#hud-season').textContent = ENGLISH_SEASONS[getSeason(s.dayOfYear)];
 
   // Status bar: show rolling 24h averages as the strategic number, with
   // the instantaneous value as dim "now:" context so the player can
@@ -231,12 +239,10 @@ export function updateHUD(): void {
 
   // Network group.
   const tierSummary = getTierPopulationSummary();
-  $('#stat-customers').textContent = `Small ${tierSummary.small.live}/${SMALL_TIER_CAP} · Mid ${tierSummary.mid.live}/${MID_TIER_CAP} · Big ${tierSummary.big.live}/${BIG_TIER_CAP}`;
+  const slotSummary = getCustomerSlotSummary();
+  $('#stat-customers').textContent = `Slots ${slotSummary.occupied}/${slotSummary.total} · Small ${tierSummary.small.live}/${SMALL_TIER_CAP} · Mid ${tierSummary.mid.live}/${MID_TIER_CAP} · Big ${tierSummary.big.live}/${BIG_TIER_CAP}`;
   const storageEl = $maybe('#stat-storage-capacity');
   if (storageEl) storageEl.textContent = fmtTonnes(getNetworkStorageCapacityKg());
-
-  // Runway indicator — the single most important v4 HUD element.
-  updateRunwayIndicator();
 
   // Periodic refreshes (~1 s)
   if (s.tick % 10 === 0) {
@@ -255,48 +261,37 @@ export function updateHUD(): void {
 }
 
 /**
- * Keep the Runway HUD cell in sync. Translates a numeric runway to a
- * color-coded string (safe/warn/danger/critical/profitable). ∞ is used
- * whenever burn is net-negative, which is the flywheel's steady state.
- */
-function updateRunwayIndicator(): void {
-  const el = $maybe('#hud-runway');
-  if (!el) return;
-  const runway = computeRunwayDays();
-  // Strip old state classes before applying the new one.
-  el.classList.remove('runway-safe', 'runway-warn', 'runway-danger', 'runway-critical', 'runway-profit');
-  if (!Number.isFinite(runway)) {
-    el.textContent = '∞';
-    el.classList.add('runway-profit');
-    return;
-  }
-  const days = Math.max(0, Math.floor(runway));
-  el.textContent = `${days}d`;
-  if (days < 30) el.classList.add('runway-critical');
-  else if (days < 60) el.classList.add('runway-danger');
-  else if (days < 120) el.classList.add('runway-warn');
-  else el.classList.add('runway-safe');
-}
-
-/**
- * Populate + show the somber Game Over modal when `state.gameOver` is
- * set. Idempotent — only re-renders the stats block once per flip.
+ * Populate + show the end-state modal when `state.gameOver` is set.
+ * Idempotent — only re-renders the stats block once per flip.
  */
 function updateGameOverScreen(): void {
   const root = $maybe('#gameover-screen');
   if (!root) return;
   const over = state.gameOver;
   if (!over?.triggered) {
-    root.classList.remove('show');
+    root.classList.remove('show', 'end-win', 'end-loss');
     return;
   }
   if (!root.classList.contains('show')) {
+    const won = over.reason === 'marketComplete';
+    root.classList.toggle('end-win', won);
+    root.classList.toggle('end-loss', !won);
+    const titleEl = $('#gameover-title');
     const reasonEl = $('#gameover-reason');
-    if (over.reason === 'bankruptcy') {
+    const sandboxBtn = $maybe<HTMLButtonElement>('#gameover-sandbox');
+    if (sandboxBtn) sandboxBtn.style.display = won ? 'inline-flex' : 'none';
+    if (over.reason === 'capitalDepleted') {
+      titleEl.textContent = 'Operation Failed';
       reasonEl.textContent =
-        'The budget sat below -€ 50M for 90 consecutive days. The operation ran out of runway before the flywheel caught — your capital was exhausted before a large enough market formed.';
-    } else {
-      reasonEl.textContent = over.reason;
+        'The budget reached €0. The operation ran out of capital before the flywheel caught. Start a new run and build a market before cash runs dry.';
+    } else if (over.reason === 'pressureDepleted') {
+      titleEl.textContent = 'Operation Failed';
+      reasonEl.textContent =
+        'Network pressure fell to 0.00 bar. The backbone ran dry, customers lost supply, and the system could not recover. Start a new run and keep the pipe pressurized.';
+    } else if (over.reason === 'marketComplete') {
+      titleEl.textContent = 'Backbone Complete';
+      reasonEl.textContent =
+        'Every customer slot is filled. France has a working hydrogen backbone: producers, pipes, storage, and demand are all connected into one market.';
     }
     const rows = summaryStats();
     const el = $('#gameover-stats');
@@ -309,6 +304,7 @@ function updateGameOverScreen(): void {
 
 function summaryStats(): Array<{ label: string; value: string }> {
   const s = state;
+  const slotSummary = getCustomerSlotSummary();
   let connected = 0;
   for (const rc of Object.values(s.regions)) {
     if (rc.pipeConnections > 0) connected++;
@@ -316,7 +312,8 @@ function summaryStats(): Array<{ label: string; value: string }> {
   return [
     { label: 'Days elapsed', value: String(s.gameDay) },
     { label: 'Customers online', value: String(s.customers.filter(c => c.active).length) },
-    { label: 'Peak network pressure', value: `${s.networkPressure.toFixed(1)} bar` },
+    { label: 'Customer slots', value: `${slotSummary.occupied} / ${slotSummary.total}` },
+    { label: 'Final network pressure', value: formatPressure(s.networkPressure) },
     { label: 'Connected regions', value: `${connected} / ${Object.keys(s.regions).length}` },
     { label: 'Final spot price', value: `€ ${s.spotPrice.toFixed(2)}/kg` },
     { label: 'Final budget', value: formatCurrency(s.money) }
@@ -326,7 +323,7 @@ function summaryStats(): Array<{ label: string; value: string }> {
 // ─── DOM region tooltip (follows cursor on hover) ────────────────────────
 /**
  * Show/update the DOM region tooltip at the cursor. Renders a rich
- * summary: name, bonus bars (solar/wind/nuclear/industry), port, current
+ * summary: name, bonus bars (solar/wind/industry), port, current
  * weather sample, buildings count, pressure and local price (if
  * connected), and supply/demand. Pass regionId=null to hide. The
  * tooltip auto-flips to the left/above the cursor when it would overflow
@@ -356,7 +353,6 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   let html = `<h4>${rc.name}</h4>`;
   html += bar('Solar', rc.solarBase);
   html += bar('Wind', rc.windBase);
-  html += bar('Nuclear', Math.min(1, rc.nuclearBonus / 1.5));
   html += bar('Industry', Math.min(1, rc.industryDemand));
   if (rc.hasPort) html += `<div class="sub-line">${inlineIcon('exportTerminal')} Port: ${rc.portName}</div>`;
   html += `<div class="sub-line">${inlineIcon('saltCavern')} Cavern geology: ${cavernEligible ? 'viable' : 'not suitable (no salt)'}</div>`;
@@ -371,7 +367,7 @@ export function updateRegionTooltip(regionId: string | null, mx: number, my: num
   const avgRegionSupply = getRollingRegionSupply(state, regionId);
   const avgRegionDemand = getRollingRegionDemand(state, regionId);
   if (rs.pipeConnections > 0) {
-    html += `<div class="sub-line">${inlineIcon('pressureGauge')} Pressure: ${rs.pressure.toFixed(1)} bar · € ${rs.localPrice.toFixed(2)}/kg</div>`;
+    html += `<div class="sub-line">${inlineIcon('pressureGauge')} Pressure: ${formatPressure(rs.pressure)} · € ${rs.localPrice.toFixed(2)}/kg</div>`;
     html += `<div class="sub-line">Supply ${fmtWhole(avgRegionSupply)} / Demand ${fmtWhole(avgRegionDemand)} kg/day (24h avg)</div>`;
     html += `<div class="sub-line tooltip-now">now ${fmtWhole(rs.supply)} / ${fmtWhole(rs.demand)}</div>`;
   } else if (rs.supply > 0 || avgRegionSupply > 0) {
@@ -413,7 +409,7 @@ export function updateBuildCosts(): void {
     if (!costEl) continue;
     if (type === 'pipeline') {
       const pipeCfg = cfg as typeof BUILDINGS.pipeline;
-      costEl.textContent = `~€ ${fmtMoney(pipeCfg.baseCostPerKm)}/km`;
+      costEl.textContent = `€ ${fmtMoney(pipeCfg.baseCostPerKm)}/km`;
       btn.classList.toggle('disabled', state.money < 5_000_000);
     } else {
       const cost = getCost(type as Exclude<BuildingType, 'pipeline'>);
@@ -467,13 +463,12 @@ export function showRegionInfo(regionId: string): void {
   html += row('Capital', rc.capital);
   html += row('Solar Potential', `${(rc.solarBase * 100).toFixed(0)}%`);
   html += row('Wind Potential', `${(rc.windBase * 100).toFixed(0)}%`);
-  html += row('Nuclear', rc.nuclearBonus > 0.5 ? `Yes (×${rc.nuclearBonus.toFixed(1)})` : 'No');
+  html += row('Nuclear Output', 'Site-independent');
   html += row('Industry Factor', `${(rc.industryDemand * 100).toFixed(0)}%`);
   if (rc.hasPort) html += row('Port', `${inlineIcon('exportTerminal')} ${rc.portName}`);
-  html += row('Gas Infrastructure', `${(rc.gasInfra * 100).toFixed(0)}%`);
   html += row('Pipe Connections', String(rs.pipeConnections || 0));
   html += row('Local H₂ Price', `€ ${rs.localPrice.toFixed(2)}/kg`);
-  html += row('Pressure', `${rs.pressure.toFixed(1)} bar`);
+  html += row('Pressure', formatPressure(rs.pressure));
   html += row('Cavern Geology', SALT_CAVERN_ELIGIBLE_REGIONS[regionId] ? 'Viable' : 'Not suitable (no salt)');
   const infoAvgSupply = getRollingRegionSupply(state, regionId);
   const infoAvgDemand = getRollingRegionDemand(state, regionId);
@@ -518,7 +513,6 @@ export function showRegionInfo(regionId: string): void {
   let quote = '';
   if (rc.solarBase >= 0.8) quote = '"Solar electricity in southern Europe costs 20 €/MWh today… This is not a projection."';
   else if (rc.windBase >= 0.8) quote = '"Every MWh of excess renewable generation can be converted to hydrogen."';
-  else if (rc.nuclearBonus >= 1.3) quote = '"Nuclear excels at constant output… Electrolysis absorbs off-peak nuclear power."';
   else if (rc.hasPort) quote = '"France\'s port infrastructure is positioned for e-fuel export."';
   else if (rc.industryDemand >= 1.3) quote = '"A single DRI plant consumes roughly 70,000 tonnes of H₂ per year. Connect it to the pipe."';
   if (quote) html += `<div class="manifesto-quote">${quote}</div>`;
@@ -566,7 +560,7 @@ export function showToast(msg: string): void {
  */
 export function showManifesto(insight: Insight): void {
   const ref = String(134 + state.insightIndex).padStart(3, '0');
-  $('#mp-title').textContent = `NOTE DE SERVICE · Document Réf. 2027-M/${ref}`;
+  $('#mp-title').textContent = `OFFICE MEMO · Document Ref. 2027-M/${ref}`;
   $('#mp-text').textContent = `${insight.title}\n\n${insight.text}`;
   $('#manifesto-popup').style.display = 'flex';
 }
@@ -592,6 +586,11 @@ function investInResearch(track: ResearchTrackName): void {
     showToast('Research already complete.');
     return;
   }
+  const prerequisite = getResearchPrerequisite(state, track);
+  if (!prerequisite.met) {
+    showToast(`Need ${prerequisite.required} ${prerequisite.label} for the next ${labelResearchTrack(track)} tier.`);
+    return;
+  }
   if (!buyResearchTier(state, track)) {
     showToast(`Need € ${fmtMoney(nextCost)} for the next ${labelResearchTrack(track)} tier.`);
     return;
@@ -602,12 +601,6 @@ function investInResearch(track: ResearchTrackName): void {
   showToast(`${labelResearchTrack(track)} research advanced to tier ${state.research[track].tier}.`);
 }
 
-export function toggleResearchPanel(): void {
-  const panel = $('#research-panel');
-  panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
-  if (panel.style.display === 'block') updateResearchPanel();
-}
-
 function updateResearchPanel(): void {
   const summary = $maybe('#research-summary');
   const cards = $maybe('#research-cards');
@@ -616,7 +609,11 @@ function updateResearchPanel(): void {
     solar: state.research.solar.tier,
     wind: state.research.wind.tier,
     nuclear: state.research.nuclear.tier,
-    electrolyzer: state.research.electrolyzer.tier
+    electrolyzer: state.research.electrolyzer.tier,
+    solarPrereq: getResearchPrerequisite(state, 'solar').current,
+    windPrereq: getResearchPrerequisite(state, 'wind').current,
+    nuclearPrereq: getResearchPrerequisite(state, 'nuclear').current,
+    electrolyzerPrereq: getResearchPrerequisite(state, 'electrolyzer').current
   });
   if (signature === lastResearchPanelSignature) return;
   lastResearchPanelSignature = signature;
@@ -633,20 +630,27 @@ function renderResearchCard(track: ResearchTrackName): string {
   const tier = state.research[track].tier;
   const nextCost = getNextTierCost(state, track);
   const maxed = tier >= MAX_RESEARCH_TIER;
+  const prerequisite = getResearchPrerequisite(state, track);
   const affordable = nextCost !== null && state.money >= nextCost;
+  const unlocked = maxed || prerequisite.met;
+  const canInvest = affordable && unlocked;
   const lines = getResearchCardLines(track, tier);
   const pips = Array.from({ length: MAX_RESEARCH_TIER }, (_, index) =>
     `<span class="research-pip${index < tier ? ' on' : ''}"></span>`
   ).join('');
+  const prerequisiteLine = maxed
+    ? ''
+    : `<div class="research-line"><strong>Requires:</strong> ${prerequisite.current}/${prerequisite.required} ${prerequisite.label}</div>`;
   const action = maxed
-    ? `<div class="research-maxed">Recherche complète</div>`
-    : `<button class="research-buy" data-research-track="${track}"${affordable ? '' : ' disabled'}>${affordable ? 'Invest' : 'Insufficient budget'} · € ${fmtMoney(nextCost ?? 0)}</button>`;
+    ? `<div class="research-maxed">Research complete</div>`
+    : `<button class="research-buy" data-research-track="${track}"${canInvest ? '' : ' disabled'}>${getResearchButtonText(nextCost ?? 0, prerequisite)}</button>`;
   return `<div class="research-card${maxed ? ' research-card-complete' : ''}">
     <h4>${labelResearchTrack(track)} Research</h4>
     <div class="research-tier">Tier ${tier} of ${MAX_RESEARCH_TIER}</div>
     <div class="research-pips">${pips}</div>
     <div class="research-line"><strong>Current:</strong> ${lines.current}</div>
     <div class="research-line"><strong>Next:</strong> ${lines.next}</div>
+    ${prerequisiteLine}
     ${action}
   </div>`;
 }
@@ -660,10 +664,16 @@ function syncResearchAffordability(): void {
     if (!track) return;
     const nextCost = getNextTierCost(state, track);
     if (nextCost === null) return;
+    const prerequisite = getResearchPrerequisite(state, track);
     const affordable = state.money >= nextCost;
-    btn.disabled = !affordable;
-    btn.textContent = `${affordable ? 'Invest' : 'Insufficient budget'} · € ${fmtMoney(nextCost)}`;
+    btn.disabled = !affordable || !prerequisite.met;
+    btn.textContent = getResearchButtonText(nextCost, prerequisite);
   });
+}
+
+function getResearchButtonText(cost: number, prerequisite: ReturnType<typeof getResearchPrerequisite>): string {
+  if (!prerequisite.met) return `Need ${prerequisite.required} plants · € ${fmtMoney(cost)}`;
+  return `${state.money >= cost ? 'Invest' : 'Insufficient budget'} · € ${fmtMoney(cost)}`;
 }
 
 function getResearchCardLines(track: ResearchTrackName, tier: number): { current: string; next: string } {

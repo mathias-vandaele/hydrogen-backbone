@@ -1,5 +1,5 @@
 import { CUSTOMER_TYPES, REGIONS, START_MONEY } from './config';
-import type { CustomerType, GameState, RegionState } from './types';
+import type { CustomerType, GameOverState, GameState, RegionState } from './types';
 
 /**
  * Build a fresh, ready-to-play GameState. Called on boot when no save
@@ -43,8 +43,8 @@ export function createInitialState(): GameState {
     priceHistory: [],
     pressureHistory: [],
     budgetHistory: [],
-    daysBelowBankruptcyThreshold: 0,
     gameOver: null,
+    sandboxMode: false,
     thresholdCrossings,
     totalH2Produced: 0,
     totalH2Sold: 0,
@@ -95,4 +95,17 @@ export let state: GameState = createInitialState();
  */
 export function replaceState(next: GameState): void {
   state = next;
+}
+
+export function triggerGameOver(s: GameState, reason: GameOverState['reason']): void {
+  s.gameOver = { triggered: true, reason, day: s.gameDay };
+  s.paused = true;
+}
+
+export function failIfCapitalDepleted(s: GameState): boolean {
+  if (s.sandboxMode) return false;
+  if (s.money > 0) return false;
+  s.money = 0;
+  triggerGameOver(s, 'capitalDepleted');
+  return true;
 }

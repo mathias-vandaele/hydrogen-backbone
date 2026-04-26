@@ -84,24 +84,18 @@ export const OPEX_ANNUAL_FRACTION = {
 // Formula: h2_kg_per_day = MW × 24 × 1000 × ELECTROLYZER_EFFICIENCY / KWH_PER_KG_H2
 export const KWH_PER_KG_H2 = 50;
 
-// Nuclear availability schedule. 75-day refuelling outage per 270-day
-// cycle ≈ 27.8% outage ≈ 72.2% availability — matching the published
+// Nuclear availability schedule. 30-day refuelling outage per 270-day
+// matching the published
 // RTE French reactor-fleet CF of ~0.72. Plants are staggered by id so
 // outages are distributed across the fleet rather than simultaneous.
-export const NUCLEAR_OUTAGE_DAYS = 25;
+export const NUCLEAR_OUTAGE_DAYS = 30;
 export const NUCLEAR_CYCLE_DAYS = 270;
 export const NUCLEAR_FLEET_PHASE_OFFSET = 0; // days between successive plants
 
 // ─── v4 Economy + v5 real-world CAPEX ────────────────────────────────────
-// STARTING_BUDGET raised to €400M so the player can afford exactly one
-// Solar Hydrogen Plant (€260M) plus a short pipeline plus an opex buffer
-// for the first few weeks — the exact design-intent described in the v5
-// brief. Scarcity pressure remains: the second plant is not affordable
-// until early customer revenue flows.
+// Starting budget for the run. Reaching €0 is an immediate lose condition.
 export const ECONOMY = {
-  STARTING_BUDGET: 10_000_000_000,
-  BANKRUPTCY_THRESHOLD: -50_000_000,     // -€50M
-  BANKRUPTCY_GRACE_DAYS: 90
+  STARTING_BUDGET: 10_000_000_000
 };
 
 // Legacy alias — `state.ts` still imports this name; point at the new knob.
@@ -111,10 +105,12 @@ export const START_MONEY = ECONOMY.STARTING_BUDGET;
 export const PRESSURE_PRICE_MIN = 2.0;
 export const PRESSURE_PRICE_MAX = 8.0;
 export const PRESSURE_PRICE_CURVE = 8.0;
-export const DEMAND_PRICE_RESPONSE = 3.5;
-export const CUSTOMER_SUPPLY_BUFFER_MULTIPLIER = 1.2;
+export const DEMAND_PRICE_RESPONSE = 3;
+export const CUSTOMER_PRICE_THRESHOLD_MULTIPLIER = 0.80;
+export const CUSTOMER_SUPPLY_BUFFER_MULTIPLIER = 1.5;
 export const EMERGENCE_LOGISTIC_STEEPNESS = 12;
 export const EMERGENCE_LOGISTIC_CENTER = 0.7;
+export const EMERGENCE_DAILY_PROBABILITY_SCALE = 0.35;
 export const SMALL_TIER_CAP = 24;
 export const MID_TIER_CAP = 12;
 export const BIG_TIER_CAP = 6;
@@ -211,7 +207,7 @@ function makeCustomerTier(
     name: `${label} (${tier})`,
     icon,
     color,
-    priceThreshold,
+    priceThreshold: Number((priceThreshold * CUSTOMER_PRICE_THRESHOLD_MULTIPLIER).toFixed(2)),
     demandMin,
     demandMax,
     expectedDemand: (demandMin + demandMax) / 2,
@@ -223,30 +219,36 @@ function makeCustomerTier(
   };
 }
 
+const CUSTOMER_DEMAND_BANDS = {
+  small: [8_000, 25_000],
+  mid: [25_000, 50_000],
+  big: [50_000, 400_000]
+} as const satisfies Record<CustomerTier, readonly [number, number]>;
+
 export const CUSTOMER_TYPES: Record<CustomerType, CustomerTypeConfig> = {
-  steel_small: makeCustomerTier('steel', 'small', 'Steel Fabricator', 'steelPlant', COLOR.AMBER_BASE, 'industrial', 8_000, 25_000, 6.5, '"A small steelworks can switch long before a flagship DRI complex does."'),
-  steel_mid: makeCustomerTier('steel', 'mid', 'Steel Mill', 'steelPlant', COLOR.AMBER_BASE, 'industrial', 25_000, 80_000, 5.8, '"Mid-scale steel plants move when hydrogen is credible at industrial volume."'),
-  steel_big: makeCustomerTier('steel', 'big', 'Steel DRI Plant', 'steelPlant', COLOR.AMBER_BRIGHT, 'industrial', 80_000, 250_000, 5.0, '"A single DRI plant consumes roughly 70,000 tonnes of H₂ per year. Connect it to the pipe."'),
+  steel_small: makeCustomerTier('steel', 'small', 'Steel Fabricator', 'steelPlant', COLOR.AMBER_BASE, 'industrial', ...CUSTOMER_DEMAND_BANDS.small, 6.0, '"A small steelworks can switch long before a flagship DRI complex does."'),
+  steel_mid: makeCustomerTier('steel', 'mid', 'Steel Mill', 'steelPlant', COLOR.AMBER_BASE, 'industrial', ...CUSTOMER_DEMAND_BANDS.mid, 5.2, '"Mid-scale steel plants move when hydrogen is credible at industrial volume."'),
+  steel_big: makeCustomerTier('steel', 'big', 'Steel DRI Plant', 'steelPlant', COLOR.AMBER_BRIGHT, 'industrial', ...CUSTOMER_DEMAND_BANDS.big, 4.5, '"A DRI plant concentrates large, steady hydrogen demand. Connect it to the pipe."'),
 
-  ammonia_small: makeCustomerTier('ammonia', 'small', 'Fertilizer Blending Plant', 'ammoniaPlant', COLOR.AMBER_DIM, 'industrial', 5_000, 15_000, 6.0, '"Smaller ammonia users pay for reliability before mega-plants do."'),
-  ammonia_mid: makeCustomerTier('ammonia', 'mid', 'Ammonia Plant', 'ammoniaPlant', COLOR.AMBER_BASE, 'industrial', 15_000, 50_000, 5.4, '"Mid-scale Haber-Bosch capacity follows once hydrogen is consistently available."'),
-  ammonia_big: makeCustomerTier('ammonia', 'big', 'Ammonia Factory', 'ammoniaPlant', COLOR.AMBER_BRIGHT, 'industrial', 50_000, 180_000, 4.8, '"The Haber-Bosch process consumes 1.8% of global energy, almost all from grey hydrogen."'),
+  ammonia_small: makeCustomerTier('ammonia', 'small', 'Fertilizer Blending Plant', 'ammoniaPlant', COLOR.AMBER_DIM, 'industrial', ...CUSTOMER_DEMAND_BANDS.small, 5.5, '"Smaller ammonia users pay for reliability before mega-plants do."'),
+  ammonia_mid: makeCustomerTier('ammonia', 'mid', 'Ammonia Plant', 'ammoniaPlant', COLOR.AMBER_BASE, 'industrial', ...CUSTOMER_DEMAND_BANDS.mid, 4.9, '"Mid-scale Haber-Bosch capacity follows once hydrogen is consistently available."'),
+  ammonia_big: makeCustomerTier('ammonia', 'big', 'Ammonia Factory', 'ammoniaPlant', COLOR.AMBER_BRIGHT, 'industrial', ...CUSTOMER_DEMAND_BANDS.big, 4.3, '"The Haber-Bosch process consumes 1.8% of global energy, almost all from grey hydrogen."'),
 
-  efuel_small: makeCustomerTier('efuel', 'small', 'Synthetic Fuel Pilot', 'efuelRefinery', COLOR.AMBER_DIM, 'efuel', 3_000, 30_000, 5.5, '"Small e-fuel pilots prove the process before refinery-scale capital arrives."', { pressureRelief: true }),
-  efuel_mid: makeCustomerTier('efuel', 'mid', 'E-Fuel Plant', 'efuelRefinery', COLOR.AMBER_BASE, 'efuel', 30_000, 100_000, 4.9, '"A regional e-fuel plant soaks up surplus only when the pipe can really feed it."', { pressureRelief: true }),
-  efuel_big: makeCustomerTier('efuel', 'big', 'E-Fuel Refinery', 'efuelRefinery', COLOR.AMBER_BRIGHT, 'efuel', 100_000, 350_000, 4.3, '"E-fuel refineries only pencil out when hydrogen is abundant enough to look structural."', { pressureRelief: true }),
+  efuel_small: makeCustomerTier('efuel', 'small', 'Synthetic Fuel Pilot', 'efuelRefinery', COLOR.AMBER_DIM, 'efuel', ...CUSTOMER_DEMAND_BANDS.small, 5.0, '"Small e-fuel pilots prove the process before refinery-scale capital arrives."', { pressureRelief: true }),
+  efuel_mid: makeCustomerTier('efuel', 'mid', 'E-Fuel Plant', 'efuelRefinery', COLOR.AMBER_BASE, 'efuel', ...CUSTOMER_DEMAND_BANDS.mid, 4.4, '"A regional e-fuel plant soaks up surplus only when the pipe can really feed it."', { pressureRelief: true }),
+  efuel_big: makeCustomerTier('efuel', 'big', 'E-Fuel Refinery', 'efuelRefinery', COLOR.AMBER_BRIGHT, 'efuel', ...CUSTOMER_DEMAND_BANDS.big, 3.8, '"E-fuel refineries only pencil out when hydrogen is abundant enough to look structural."', { pressureRelief: true }),
 
-  chemical_small: makeCustomerTier('chemical', 'small', 'Specialty Chemical Works', 'chemicalPlant', COLOR.AMBER_DIM, 'industrial', 2_000, 12_000, 5.0, '"Specialty chemicals are often the first industrial molecules to switch."'),
-  chemical_mid: makeCustomerTier('chemical', 'mid', 'Chemical Plant', 'chemicalPlant', COLOR.AMBER_BASE, 'industrial', 12_000, 40_000, 4.5, '"Chemical demand scales in layers, not all at once."'),
-  chemical_big: makeCustomerTier('chemical', 'big', 'Integrated Chemical Complex', 'chemicalPlant', COLOR.AMBER_BRIGHT, 'industrial', 40_000, 120_000, 4.0, '"The entire petrochemical value chain has hydrogen-fed alternatives."'),
+  chemical_small: makeCustomerTier('chemical', 'small', 'Specialty Chemical Works', 'chemicalPlant', COLOR.AMBER_DIM, 'industrial', ...CUSTOMER_DEMAND_BANDS.small, 4.5, '"Specialty chemicals are often the first industrial molecules to switch."'),
+  chemical_mid: makeCustomerTier('chemical', 'mid', 'Chemical Plant', 'chemicalPlant', COLOR.AMBER_BASE, 'industrial', ...CUSTOMER_DEMAND_BANDS.mid, 4.0, '"Chemical demand scales in layers, not all at once."'),
+  chemical_big: makeCustomerTier('chemical', 'big', 'Integrated Chemical Complex', 'chemicalPlant', COLOR.AMBER_BRIGHT, 'industrial', ...CUSTOMER_DEMAND_BANDS.big, 3.5, '"The entire petrochemical value chain has hydrogen-fed alternatives."'),
 
-  fuelcell_small: makeCustomerTier('fuelcell', 'small', 'Fuel Cell Depot', 'fuelCellStation', COLOR.TEAL_DIM, 'distributed', 500, 3_000, 4.5, '"Small fuel-cell loads appear where the network already feels dependable."'),
-  fuelcell_mid: makeCustomerTier('fuelcell', 'mid', 'Fuel Cell Station', 'fuelCellStation', COLOR.TEAL_BASE, 'distributed', 3_000, 15_000, 4.0, '"Municipal fuel-cell projects arrive once hydrogen supply looks routine."'),
-  fuelcell_big: makeCustomerTier('fuelcell', 'big', 'Dispatchable Fuel Cell Hub', 'fuelCellStation', COLOR.TEAL_BRIGHT, 'distributed', 15_000, 50_000, 3.5, '"A municipality installs a fuel cell. It now has a dispatchable local power plant with no emissions."'),
+  fuelcell_small: makeCustomerTier('fuelcell', 'small', 'Fuel Cell Depot', 'fuelCellStation', COLOR.TEAL_DIM, 'distributed', ...CUSTOMER_DEMAND_BANDS.small, 4.0, '"Small fuel-cell loads appear where the network already feels dependable."'),
+  fuelcell_mid: makeCustomerTier('fuelcell', 'mid', 'Fuel Cell Station', 'fuelCellStation', COLOR.TEAL_BASE, 'distributed', ...CUSTOMER_DEMAND_BANDS.mid, 3.5, '"Municipal fuel-cell projects arrive once hydrogen supply looks routine."'),
+  fuelcell_big: makeCustomerTier('fuelcell', 'big', 'Dispatchable Fuel Cell Hub', 'fuelCellStation', COLOR.TEAL_BRIGHT, 'distributed', ...CUSTOMER_DEMAND_BANDS.big, 3.0, '"A municipality installs a fuel cell. It now has a dispatchable local power plant with no emissions."'),
 
-  export_small: makeCustomerTier('export', 'small', 'Coastal Bunkering Node', 'exportTerminal', COLOR.TEAL_DIM, 'port', 15_000, 60_000, 4.0, '"Portside hydrogen starts with bunkering and early offtake, not mega-terminals."', { minPipeConnections: 2, requiresPort: true }),
-  export_mid: makeCustomerTier('export', 'mid', 'Export Hub', 'exportTerminal', COLOR.TEAL_BASE, 'port', 60_000, 200_000, 3.5, '"Regional export hubs move only after domestic supply looks comfortably overbuilt."', { minPipeConnections: 2, requiresPort: true }),
-  export_big: makeCustomerTier('export', 'big', 'Export Terminal', 'exportTerminal', COLOR.TEAL_BRIGHT, 'port', 200_000, 600_000, 3.0, '"France\'s port infrastructure is positioned for e-fuel export to global shipping and aviation markets."', { minPipeConnections: 2, requiresPort: true })
+  export_small: makeCustomerTier('export', 'small', 'Coastal Bunkering Node', 'exportTerminal', COLOR.TEAL_DIM, 'port', ...CUSTOMER_DEMAND_BANDS.small, 3.5, '"Portside hydrogen starts with bunkering and early offtake, not mega-terminals."', { minPipeConnections: 2, requiresPort: true }),
+  export_mid: makeCustomerTier('export', 'mid', 'Export Hub', 'exportTerminal', COLOR.TEAL_BASE, 'port', ...CUSTOMER_DEMAND_BANDS.mid, 3.0, '"Regional export hubs move only after domestic supply looks comfortably overbuilt."', { minPipeConnections: 2, requiresPort: true }),
+  export_big: makeCustomerTier('export', 'big', 'Export Terminal', 'exportTerminal', COLOR.TEAL_BRIGHT, 'port', ...CUSTOMER_DEMAND_BANDS.big, 2.5, '"France\'s port infrastructure is positioned for e-fuel export to global shipping and aviation markets."', { minPipeConnections: 2, requiresPort: true })
 };
 
 // Slot distribution roughly tracks industryDemand, population, port status,
@@ -268,111 +270,111 @@ export const REGIONS: RegionConfig[] = [
   {
     id: 'hauts-de-france', code: '32', name: 'Hauts-de-France', abbr: 'HdF',
     capital: 'Lille',
-    solarBase: 0.60, windBase: 1.00, nuclearBonus: 1.3, industryDemand: 1.4,
+    solarBase: 0.60, windBase: 1.00, industryDemand: 1.4,
     hasPort: true, portName: 'Dunkirk/Calais',
-    gasInfra: 0.8, maxSlots: 12,
+    maxSlots: 12,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 2, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'grand-est', code: '44', name: 'Grand Est', abbr: 'GE',
     capital: 'Strasbourg',
-    solarBase: 0.70, windBase: 0.90, nuclearBonus: 1.4, industryDemand: 1.2,
-    hasPort: false, gasInfra: 0.7, maxSlots: 14,
+    solarBase: 0.70, windBase: 0.90, industryDemand: 1.2,
+    hasPort: false, maxSlots: 14,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 2, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'normandie', code: '28', name: 'Normandie', abbr: 'NOR',
     capital: 'Rouen',
-    solarBase: 0.60, windBase: 1.00, nuclearBonus: 1.2, industryDemand: 0.9,
+    solarBase: 0.60, windBase: 1.00, industryDemand: 0.9,
     hasPort: true, portName: 'Le Havre/Rouen',
-    gasInfra: 0.6, maxSlots: 10,
+    maxSlots: 10,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'bretagne', code: '53', name: 'Bretagne', abbr: 'BRE',
     capital: 'Rennes',
-    solarBase: 0.60, windBase: 1.00, nuclearBonus: 0.0, industryDemand: 0.6,
+    solarBase: 0.60, windBase: 1.00, industryDemand: 0.6,
     hasPort: true, portName: 'Brest',
-    gasInfra: 0.4, maxSlots: 8,
+    maxSlots: 8,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'ile-de-france', code: '11', name: 'Île-de-France', abbr: 'IdF',
     capital: 'Paris',
-    solarBase: 0.70, windBase: 0.60, nuclearBonus: 0.3, industryDemand: 1.5,
-    hasPort: false, gasInfra: 0.9, maxSlots: 8,
+    solarBase: 0.70, windBase: 0.60, industryDemand: 1.5,
+    hasPort: false, maxSlots: 8,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 2, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'centre-val-de-loire', code: '24', name: 'Centre-Val de Loire', abbr: 'CVL',
     capital: 'Orléans',
-    solarBase: 0.80, windBase: 0.70, nuclearBonus: 1.3, industryDemand: 0.7,
-    hasPort: false, gasInfra: 0.5, maxSlots: 12,
+    solarBase: 0.80, windBase: 0.70, industryDemand: 0.7,
+    hasPort: false, maxSlots: 12,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'pays-de-la-loire', code: '52', name: 'Pays de la Loire', abbr: 'PdL',
     capital: 'Nantes',
-    solarBase: 0.75, windBase: 0.90, nuclearBonus: 0.5, industryDemand: 0.7,
+    solarBase: 0.75, windBase: 0.90, industryDemand: 0.7,
     hasPort: true, portName: 'Nantes-Saint-Nazaire',
-    gasInfra: 0.5, maxSlots: 10,
+    maxSlots: 10,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 0
   },
   {
     id: 'bourgogne-franche-comte', code: '27', name: 'Bourgogne-Franche-Comté', abbr: 'BFC',
     capital: 'Dijon',
-    solarBase: 0.75, windBase: 0.70, nuclearBonus: 0.8, industryDemand: 0.8,
-    hasPort: false, gasInfra: 0.6, maxSlots: 12,
+    solarBase: 0.75, windBase: 0.70, industryDemand: 0.8,
+    hasPort: false, maxSlots: 12,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 0, portSlots: 0, efuelSlots: 0
   },
   {
     id: 'nouvelle-aquitaine', code: '75', name: 'Nouvelle-Aquitaine', abbr: 'NAQ',
     capital: 'Bordeaux',
-    solarBase: 0.90, windBase: 0.75, nuclearBonus: 0.8, industryDemand: 0.8,
+    solarBase: 0.90, windBase: 0.75, industryDemand: 0.8,
     hasPort: true, portName: 'Bordeaux/La Rochelle',
-    gasInfra: 0.7, maxSlots: 16,
+    maxSlots: 16,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'auvergne-rhone-alpes', code: '84', name: 'Auvergne-Rhône-Alpes', abbr: 'ARA',
     capital: 'Lyon',
-    solarBase: 0.80, windBase: 0.60, nuclearBonus: 1.5, industryDemand: 1.3,
-    hasPort: false, gasInfra: 0.8, maxSlots: 14,
+    solarBase: 0.80, windBase: 0.60, industryDemand: 1.3,
+    hasPort: false, maxSlots: 14,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'occitanie', code: '76', name: 'Occitanie', abbr: 'OCC',
     capital: 'Toulouse',
-    solarBase: 1.00, windBase: 0.75, nuclearBonus: 0.6, industryDemand: 0.9,
-    hasPort: false, gasInfra: 0.6, maxSlots: 14,
+    solarBase: 1.00, windBase: 0.75, industryDemand: 0.9,
+    hasPort: false, maxSlots: 14,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 1, distributedSlots: 1, portSlots: 0, efuelSlots: 1
   },
   {
     id: 'provence-alpes-cote-dazur', code: '93', name: "Provence-Alpes-Côte d'Azur", abbr: 'PACA',
     capital: 'Marseille',
-    solarBase: 1.00, windBase: 0.60, nuclearBonus: 0.7, industryDemand: 1.0,
+    solarBase: 1.00, windBase: 0.60, industryDemand: 1.0,
     hasPort: true, portName: 'Marseille-Fos',
-    gasInfra: 0.7, maxSlots: 12,
+    maxSlots: 12,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 1, efuelSlots: 1
   },
   {
     id: 'corse', code: '94', name: 'Corse', abbr: 'COR',
     capital: 'Ajaccio',
-    solarBase: 1.00, windBase: 0.85, nuclearBonus: 0.0, industryDemand: 0.3,
+    solarBase: 1.00, windBase: 0.85, industryDemand: 0.3,
     hasPort: true, portName: 'Ajaccio/Bastia',
-    gasInfra: 0.1, maxSlots: 4,
+    maxSlots: 4,
     color: COLOR.SURFACE_BASE,
     industrialSlots: 0, distributedSlots: 1, portSlots: 0, efuelSlots: 0
   }

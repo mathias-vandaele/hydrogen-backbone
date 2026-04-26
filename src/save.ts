@@ -146,8 +146,22 @@ function migrateSave(raw: Partial<GameState>): GameState {
   if (!Array.isArray(merged.revenueSamples)) merged.revenueSamples = [];
   if (!Array.isArray(merged.opexSamples)) merged.opexSamples = [];
   if (typeof merged.financeSampleIndex !== 'number') merged.financeSampleIndex = 0;
-  if (typeof merged.daysBelowBankruptcyThreshold !== 'number') merged.daysBelowBankruptcyThreshold = 0;
   if (typeof merged.gameOver === 'undefined') merged.gameOver = null;
+  if (typeof merged.sandboxMode !== 'boolean') merged.sandboxMode = false;
+  const savedGameOverReason = (merged.gameOver as { reason?: string } | null)?.reason;
+  if (
+    merged.gameOver &&
+    savedGameOverReason !== 'capitalDepleted' &&
+    savedGameOverReason !== 'pressureDepleted' &&
+    savedGameOverReason !== 'marketComplete'
+  ) {
+    merged.gameOver = null;
+  }
+  if (!merged.sandboxMode && merged.money <= 0) {
+    merged.money = 0;
+    merged.gameOver = { triggered: true, reason: 'capitalDepleted', day: merged.gameDay };
+    merged.paused = true;
+  }
 
   // Rolling 24h sample ring buffers (added after v4). Start empty — the
   // first game-day will refill them; don't try to reconstruct from history.

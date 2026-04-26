@@ -98,11 +98,9 @@ export interface RegionConfig {
   capital: string;
   solarBase: number;
   windBase: number;
-  nuclearBonus: number;
   industryDemand: number;
   hasPort: boolean;
   portName?: string;
-  gasInfra: number;
   maxSlots: number;
   color: string;
   // Priority 4: finite customer slots per region per slot-kind.
@@ -115,7 +113,6 @@ export interface RegionConfig {
 export interface RegionBonuses {
   solar: number;
   wind: number;
-  nuclear: number;
   industrial: number;
   port: number;
   landCapacity: number;
@@ -242,10 +239,10 @@ export interface ResearchState {
   electrolyzer: ResearchTrack;
 }
 
-/** v4: bankruptcy lose-condition state. */
+/** End-condition state read by the end-state screen. */
 export interface GameOverState {
   triggered: boolean;
-  reason: string;
+  reason: 'capitalDepleted' | 'pressureDepleted' | 'marketComplete';
   day: number;
 }
 
@@ -270,10 +267,10 @@ export interface GameState {
   pressureHistory: number[];
   /** Daily snapshot of `money` for the Budget history chart (Priority 3). */
   budgetHistory: number[];
-  /** Days in a row the budget has sat below BANKRUPTCY_THRESHOLD. */
-  daysBelowBankruptcyThreshold: number;
-  /** Populated when bankruptcy grace expires; the game-over screen reads it. */
+  /** Populated when a win/loss condition fires; the end-state screen reads it. */
   gameOver: GameOverState | null;
+  /** Free-play mode entered after victory. Suppresses terminal conditions. */
+  sandboxMode: boolean;
   thresholdCrossings: Record<CustomerType, number | null>;
   totalH2Produced: number;
   totalH2Sold: number;

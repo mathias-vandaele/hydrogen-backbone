@@ -123,7 +123,7 @@ export function drawGauge(
   ctx.font = canvasFont('22px', 'mono', 'BOLD');
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(value.toFixed(1), cx, cy + radius * 0.35);
+  ctx.fillText(value.toFixed(2), cx, cy + radius * 0.35);
 
   // Label + unit
   ctx.fillStyle = withAlpha(COLOR.TYPE_TERTIARY, 0.9);

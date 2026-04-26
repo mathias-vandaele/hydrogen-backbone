@@ -10,15 +10,13 @@
   <canvas id="gameCanvas"></canvas>
 
   <div id="hud-top">
-    <div class="hud-title"><span class="hud-title-main">LA DORSALE</span><span class="hud-title-ref">MINISTÈRE INFRA H₂</span></div>
+    <div class="hud-title"><span class="hud-title-main">THE BACKBONE</span><span class="hud-title-ref">H₂ INFRA MINISTRY</span></div>
     <div class="hud-item"><span class="hud-label">Budget</span><span class="hud-value" id="hud-money">€ 150M</span></div>
-    <div class="hud-item hud-runway" title="Days of operation remaining at current burn rate"><span class="hud-label">Runway</span><span class="hud-value" id="hud-runway">∞</span></div>
     <div class="hud-item"><span class="hud-label">H₂ Price</span><span class="hud-value" id="hud-price">€ 6.00/kg</span></div>
     <div class="hud-item"><span class="hud-label">H₂ Produced</span><span class="hud-value" id="hud-produced">0 t</span></div>
     <div class="hud-item"><span class="hud-label">Customers</span><span class="hud-value" id="hud-customers">0</span></div>
-    <div class="hud-item"><span class="hud-label">Date</span><span class="hud-value" id="hud-day">21 MARS 2025</span></div>
-    <div class="hud-item"><span class="hud-label">Season</span><span class="hud-value" id="hud-season">PRINTEMPS</span></div>
-    <div class="hud-item hud-action" id="research-toggle" title="Research"><span class="hud-label" data-icon="electrolyzer"></span><span class="hud-value">Research</span></div>
+    <div class="hud-item"><span class="hud-label">Date</span><span class="hud-value" id="hud-day">21 MARCH 2025</span></div>
+    <div class="hud-item"><span class="hud-label">Season</span><span class="hud-value" id="hud-season">SPRING</span></div>
     <div class="hud-item" id="save-toggle" title="Save/Load" style="cursor:pointer"><span class="hud-label" data-icon="save"></span></div>
     <div class="hud-item" id="sound-toggle" title="Sound" style="cursor:pointer"><span class="hud-label" id="sound-icon" data-icon="soundOn"></span></div>
     <div id="speed-controls">
@@ -33,15 +31,15 @@
     <h3><span data-icon="pipeJunction"></span> Build</h3>
     <button class="build-btn" data-type="solarPlant">
       <span class="build-title"><span data-icon="solarPlant"></span><span>Solar Hydrogen Plant</span></span><br><span class="cost"></span>
-      <div class="desc">100 MW solar + integrated electrolyzer. Only molecules leave.</div>
+        <div class="desc">100 MW solar + integrated electrolyzer. Produces only in sunlight.</div>
     </button>
     <button class="build-btn" data-type="windPlant">
       <span class="build-title"><span data-icon="windPlant"></span><span>Wind Hydrogen Plant</span></span><br><span class="cost"></span>
-      <div class="desc">100 MW wind + integrated electrolyzer. Only molecules leave.</div>
+        <div class="desc">100 MW wind + integrated electrolyzer. Produces only when wind is blowing.</div>
     </button>
     <button class="build-btn" data-type="nuclearPlant">
       <span class="build-title"><span data-icon="nuclearPlant"></span><span>Nuclear Hydrogen Plant</span></span><br><span class="cost"></span>
-      <div class="desc">Baseload reactor + integrated electrolyzer. 24/7.</div>
+        <div class="desc">300 MW reactor + integrated electrolyzer. Site-independent baseload.</div>
     </button>
     <button class="build-btn" data-type="saltCavern">
       <span class="build-title"><span data-icon="saltCavern"></span><span>Salt Cavern</span></span><br><span class="cost"></span>
@@ -51,17 +49,17 @@
       <span class="build-title"><span data-icon="pipeline"></span><span>Pipeline</span></span><br><span class="cost">Click two regions to connect</span>
       <div class="desc">The backbone — transport &amp; store H₂</div>
     </button>
+
+    <div id="research-panel">
+      <h3><span data-icon="electrolyzer"></span> Research</h3>
+      <div id="research-summary"></div>
+      <div id="research-cards"></div>
+    </div>
   </div>
 
   <div id="info-panel">
     <h3 id="info-title">Region Info</h3>
     <div id="info-content"></div>
-  </div>
-
-  <div id="research-panel">
-    <h3><span data-icon="electrolyzer"></span> Research</h3>
-    <div id="research-summary"></div>
-    <div id="research-cards"></div>
   </div>
 
   <div id="region-tooltip"></div>
@@ -80,17 +78,18 @@
     </div>
     <div class="status-group status-network">
       <div class="stat">Storage Capacity: <span class="stat-val" id="stat-storage-capacity">0 kg</span></div>
-      <div class="stat">Customers: <span class="stat-val" id="stat-customers">Small 0/24 · Mid 0/12 · Big 0/6</span></div>
+      <div class="stat">Customers: <span class="stat-val" id="stat-customers">Slots 0/0 · Small 0/24 · Mid 0/12 · Big 0/6</span></div>
     </div>
   </div>
 
-  <!-- Game Over modal (Priority 2: bankruptcy lose-state). -->
+  <!-- End-state modal. -->
   <div id="gameover-screen">
     <div class="gameover-box">
-      <h2>Out of Runway</h2>
+      <h2 id="gameover-title">Run Complete</h2>
       <p class="gameover-sub" id="gameover-reason">The backbone ran out of money before the flywheel caught.</p>
       <div id="gameover-stats"></div>
       <div class="end-actions">
+        <button id="gameover-sandbox">Continue sandbox</button>
         <button id="gameover-newgame">Start a new run</button>
       </div>
     </div>
